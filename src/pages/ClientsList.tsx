@@ -1,14 +1,44 @@
-﻿import { addDoc, collection, getDocs, limit, orderBy, query, startAfter, type DocumentSnapshot, where, serverTimestamp } from "firebase/firestore";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+
+import { addDoc, collection, getDocs, serverTimestamp } from "firebase/firestore";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { db } from "../lib/firebase";
 import { createDemoClient, listDemoClients } from "../lib/demoData";
 import type { Client } from "../types";
-import debounce from "../utils/debounce";
 
-const PAGE_SIZE = 10;
-const searchLimitSuffix = "\uF8FF";
+const CLIENTS_COLLECTION = "clientes";
+
+const normalizeClient = (docId: string, raw: Record<string, any>, fallbackOwner?: string | null): Client => {
+  const first = raw.fullName || raw.fullname || raw.nombre || raw.Nombre || "";
+  const last = raw.lastName || raw.apellido || raw.Apellido || "";
+  const combined = `${first} ${last}`.trim();
+  const fullName = combined || first || last || docId;
+  const mainBarberId = raw.mainBarberId || raw.barberoId || raw.ownerId || fallbackOwner || "";
+  return {
+    id: docId,
+    fullName,
+    fullName_lower: raw.fullName_lower || fullName.toLowerCase(),
+    phone: raw.phone || raw.telefono || raw.Telefono || "",
+    mainBarberId,
+    notes: raw.notes || raw.Informacion || raw.info || "",
+    createdAt: raw.createdAt ?? null,
+  };
+};
+
+const applyFilters = (source: Client[], text: string, onlyMine: boolean, ownerId?: string | null) => {
+  const query = text.trim().toLowerCase();
+  return source.filter((client) => {
+    if (onlyMine && ownerId) {
+      if (client.mainBarberId && client.mainBarberId !== ownerId) return false;
+    }
+    if (!query) return true;
+    const name = (client.fullName || "").toLowerCase();
+    const phone = (client.phone || "").toLowerCase();
+    const notes = (client.notes || "").toLowerCase();
+    return name.includes(query) || phone.includes(query) || notes.includes(query);
+  });
+};
 
 export default function ClientsList() {
   const { user, role } = useAuth();
@@ -17,102 +47,67 @@ export default function ClientsList() {
 
   const [onlyMine, setOnlyMine] = useState(false);
   const [qText, setQText] = useState("");
-  const [rows, setRows] = useState<Client[]>(() => (isDemo ? listDemoClients() : []));
-  const [cursorStack, setCursorStack] = useState<DocumentSnapshot[]>([]);
-  const [lastDoc, setLastDoc] = useState<DocumentSnapshot | null>(null);
-  const [hasNext, setHasNext] = useState(false);
+  const [allRows, setAllRows] = useState<Client[]>(() => (isDemo ? listDemoClients() : []));
+  const [rows, setRows] = useState<Client[]>(() => applyFilters(allRows, qText, onlyMine, user?.uid));
   const [loading, setLoading] = useState(() => !isDemo);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ fullName: "", phone: "" });
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const runDemoFilter = () => {
-    const text = qText.trim().toLowerCase();
-    let filtered = listDemoClients();
-    if (onlyMine && user) filtered = filtered.filter((c) => c.mainBarberId === user.uid);
-    if (text) filtered = filtered.filter((c) => c.fullName.toLowerCase().includes(text));
-    setRows(filtered);
-    setHasNext(false);
+  const refreshDemoData = useCallback(() => {
+    const demo = listDemoClients();
+    setAllRows(demo);
+    setRows(applyFilters(demo, qText, onlyMine, user?.uid));
     setLoading(false);
-  };
+    setLoadError(null);
+  }, [onlyMine, qText, user?.uid]);
 
-  const doFetch = async (direction: "first" | "next" | "prev") => {
+  const fetchClients = useCallback(async () => {
     if (!db) {
-      runDemoFilter();
+      refreshDemoData();
       return;
     }
 
     setLoading(true);
-    const clients = collection(db, "clients");
-    const base = onlyMine && user ? query(clients, where("mainBarberId", "==", user.uid)) : clients;
+    setLoadError(null);
 
-    let qRef = base;
-    const text = qText.trim().toLowerCase();
-    if (text) {
-      const end = `${text}${searchLimitSuffix}`;
-      qRef = query(
-        base,
-        where("fullName_lower", ">=", text),
-        where("fullName_lower", "<=", end),
-        orderBy("fullName_lower"),
-        limit(PAGE_SIZE)
-      );
-    } else {
-      qRef = query(base, orderBy("fullName"), limit(PAGE_SIZE));
+    try {
+      const database = db;
+      if (!database) {
+        refreshDemoData();
+        return;
+      }
+      const snap = await getDocs(collection(database, CLIENTS_COLLECTION));
+      const mapped = snap.docs.map((doc) => normalizeClient(doc.id, doc.data() as any, user?.uid));
+      const sorted = mapped.sort((a, b) => a.fullName.localeCompare(b.fullName));
+      setAllRows(sorted);
+    } catch (error) {
+      console.error("No pudimos cargar clientes", error);
+      setAllRows([]);
+      setLoadError("No pudimos sincronizar clientes. Verifica tu conexion o indices de Firestore.");
+    } finally {
+      setLoading(false);
     }
-
-    if (direction === "next" && lastDoc) {
-      qRef = query(qRef, startAfter(lastDoc));
-    } else if (direction === "prev") {
-      const prevStack = [...cursorStack];
-      const prevCursor = prevStack.splice(-2, 1)[0];
-      setCursorStack(prevStack);
-      const base2 = onlyMine && user ? query(clients, where("mainBarberId", "==", user.uid)) : clients;
-      const text2 = qText.trim().toLowerCase();
-      let qRef2 = text2
-        ? query(
-            base2,
-            where("fullName_lower", ">=", text2),
-            where("fullName_lower", "<=", `${text2}${searchLimitSuffix}`),
-            orderBy("fullName_lower"),
-            limit(PAGE_SIZE)
-          )
-        : query(base2, orderBy("fullName"), limit(PAGE_SIZE));
-      if (prevCursor) qRef = query(qRef2, startAfter(prevCursor));
-    }
-
-    const snap = await getDocs(qRef);
-    const data = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-    setRows(data as Client[]);
-    setLastDoc(snap.docs[snap.docs.length - 1] || null);
-    setHasNext(snap.docs.length === PAGE_SIZE);
-    if (direction !== "prev") {
-      setCursorStack((stack) => {
-        const firstDoc = snap.docs[0];
-        return firstDoc ? [...stack, firstDoc] : stack;
-      });
-    }
-    setLoading(false);
-  };
-
-  const debounced = useMemo(() => debounce(() => void doFetch("first"), 350), [onlyMine, user, db]);
+  }, [refreshDemoData, user?.uid]);
 
   useEffect(() => {
-    if (!db) {
-      runDemoFilter();
+    if (isDemo) {
+      refreshDemoData();
       return;
     }
-    void doFetch("first");
-  }, [onlyMine]);
+    void fetchClients();
+  }, [isDemo, fetchClients, refreshDemoData]);
 
   useEffect(() => {
-    if (!db) {
-      runDemoFilter();
+    if (isDemo) {
+      const demo = listDemoClients();
+      setRows(applyFilters(demo, qText, onlyMine, user?.uid));
       return;
     }
-    debounced();
-  }, [qText, debounced]);
+    setRows(applyFilters(allRows, qText, onlyMine, user?.uid));
+  }, [qText, onlyMine, allRows, user?.uid, isDemo]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -130,18 +125,17 @@ export default function ClientsList() {
     try {
       if (!db) {
         createDemoClient({ fullName, phone, mainBarberId: user?.uid });
-        runDemoFilter();
+        refreshDemoData();
       } else {
-        const payload: Record<string, any> = {
+        await addDoc(collection(db, CLIENTS_COLLECTION), {
           fullName,
           fullName_lower: fullName.toLowerCase(),
+          phone: phone || undefined,
           mainBarberId: user?.uid || "",
           notes: "",
           createdAt: serverTimestamp(),
-        };
-        if (phone) payload.phone = phone;
-        await addDoc(collection(db, "clients"), payload);
-        await doFetch("first");
+        });
+        await fetchClients();
       }
       setForm({ fullName: "", phone: "" });
       setShowForm(false);
@@ -231,7 +225,8 @@ export default function ClientsList() {
 
       <section className="space-y-3">
         {loading && <div className="text-[var(--ink-soft)]">Cargando...</div>}
-        {!loading &&
+        {loadError && !loading && <div className="text-sm text-red-600">{loadError}</div>}
+        {!loading && !loadError &&
           displayRows.map((client) => (
             <Link key={client.id} to={`/clientes/${client.id}`} className="list-item">
               <div className="avatar">{client.fullName.split(" ").map((part) => part[0]).slice(0, 2)}</div>
@@ -242,16 +237,13 @@ export default function ClientsList() {
               <span className="sub">Ver</span>
             </Link>
           ))}
-        {!loading && displayRows.length === 0 && <div className="text-[var(--ink-soft)] text-sm">No encontramos coincidencias.</div>}
+        {!loading && !loadError && displayRows.length === 0 && <div className="text-[var(--ink-soft)] text-sm">No encontramos coincidencias.</div>}
       </section>
 
       {!isDemo && (
-        <footer className="flex items-center justify-between">
-          <button className="btn btn-ghost" onClick={() => void doFetch("prev")} disabled={cursorStack.length <= 1}>
-            Anterior
-          </button>
-          <button className="btn btn-primary" onClick={() => void doFetch("next")} disabled={!hasNext}>
-            Siguiente
+        <footer className="flex items-center justify-end">
+          <button className="btn btn-ghost" type="button" onClick={() => void fetchClients()} disabled={loading}>
+            Actualizar
           </button>
         </footer>
       )}
@@ -262,3 +254,4 @@ export default function ClientsList() {
     </div>
   );
 }
+

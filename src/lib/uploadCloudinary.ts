@@ -12,11 +12,12 @@ export async function uploadImage(file: File, folder: string) {
     return `https://placehold.co/600x600?text=${prettyName}`;
   }
 
-  const url = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
+    const url = `https://api.cloudinary.com/v1_1/${cloudName!}/image/upload`;
   const form = new FormData();
   form.append("file", file);
-  form.append("upload_preset", uploadPreset);
+  form.append("upload_preset", uploadPreset!);
   form.append("folder", folder);
   const { data } = await axios.post(url, form);
   return data.secure_url as string;
 }
+

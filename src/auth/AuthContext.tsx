@@ -1,14 +1,20 @@
-﻿import { signOut } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+
+import { signOut } from "firebase/auth";
+import { collection, doc, getDoc, getDocs, limit, query, where } from "firebase/firestore";
 import { createContext, useContext, useEffect, useState } from "react";
 import type { User } from "firebase/auth";
 import type { Role } from "../types";
 import { auth, db, isFirebaseConfigured } from "../lib/firebase";
 import { listDemoUsers, type DemoUser } from "../lib/demoData";
 
+const FALLBACK_ADMIN_EMAIL = "barberiawebpro@gmail.com";
+const USERS_COLLECTION = "users";
+const BARBERS_COLLECTION = "barberos";
+
 interface AuthContextValue {
   user: User | null;
   role?: Role;
+  profileName?: string;
   loading: boolean;
   demoMode: boolean;
   loginDemo: (userId: string) => void;
@@ -20,6 +26,7 @@ const noop = async () => {};
 const AuthCtx = createContext<AuthContextValue>({
   user: null,
   role: undefined,
+  profileName: undefined,
   loading: true,
   demoMode: !isFirebaseConfigured,
   loginDemo: () => undefined,
@@ -31,6 +38,7 @@ export const useAuth = () => useContext(AuthCtx);
 type InternalState = {
   user: User | null;
   role?: Role;
+  profileName?: string;
   loading: boolean;
   demoMode: boolean;
 };
@@ -38,8 +46,58 @@ type InternalState = {
 const initialState: InternalState = {
   user: null,
   role: undefined,
+  profileName: undefined,
   loading: true,
   demoMode: !isFirebaseConfigured,
+};
+
+const normalizeEmail = (email?: string | null) => email?.trim().toLowerCase() || null;
+
+type ResolvedProfile = { role?: Role; displayName?: string };
+
+const extractName = (data: Record<string, any> | undefined | null): string | undefined => {
+  if (!data) return undefined;
+  const primary = data.displayName || data.nombre || data.Nombre;
+  const last = data.lastName || data.apellido || data.Apellido;
+  if (primary && last) return `${primary} ${last}`.trim();
+  if (primary) return primary;
+  if (last) return last;
+  return undefined;
+};
+
+const resolveProfileFromDb = async (uid: string, email?: string | null): Promise<ResolvedProfile> => {
+  if (!db) return {};
+
+  const userDoc = await getDoc(doc(db!, USERS_COLLECTION, uid));
+  const directData = userDoc.data() as Record<string, any> | undefined;
+  const directRole = (directData?.role as Role | undefined) || undefined;
+  const directName = extractName(directData);
+  if (directRole || directName) return { role: directRole, displayName: directName };
+
+  const normalizedEmail = normalizeEmail(email);
+  if (normalizedEmail) {
+    const queries = [
+      query(collection(db!, USERS_COLLECTION), where("email", "==", normalizedEmail), limit(1)),
+      query(collection(db!, BARBERS_COLLECTION), where("email", "==", normalizedEmail), limit(1)),
+    ];
+
+    for (const qRef of queries) {
+      const snap = await getDocs(qRef);
+      const docSnap = snap.docs[0];
+      if (docSnap) {
+        const data = docSnap.data() as Record<string, any> | undefined;
+        const role = (data?.role as Role | undefined) || undefined;
+        const name = extractName(data);
+        if (role || name) return { role, displayName: name };
+      }
+    }
+  }
+
+  const barberDoc = await getDoc(doc(db!, BARBERS_COLLECTION, uid));
+  const barberData = barberDoc.data() as Record<string, any> | undefined;
+  const role = (barberData?.role as Role | undefined) || undefined;
+  const name = extractName(barberData);
+  return { role, displayName: name };
 };
 
 const toFirebaseUser = (demo: DemoUser): User =>
@@ -54,33 +112,37 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
 
   useEffect(() => {
     if (!auth || !isFirebaseConfigured) {
-      setState({ user: null, role: undefined, loading: false, demoMode: true });
+      setState({ user: null, role: undefined, profileName: undefined, loading: false, demoMode: true });
       return;
     }
 
-    const unsubscribe = onAuthStateChangedWithRole();
+    const unsubscribe = onAuthStateChangedWithProfile();
     return () => unsubscribe();
   }, []);
 
-  const onAuthStateChangedWithRole = () =>
+  const onAuthStateChangedWithProfile = () =>
     auth!.onAuthStateChanged(async (firebaseUser) => {
       if (!firebaseUser) {
-        setState({ user: null, role: undefined, loading: false, demoMode: false });
+        setState({ user: null, role: undefined, profileName: undefined, loading: false, demoMode: false });
         return;
       }
 
-      if (!db) {
-        setState({ user: firebaseUser, role: undefined, loading: false, demoMode: false });
-        return;
-      }
+      const fallbackRole = normalizeEmail(firebaseUser.email) === FALLBACK_ADMIN_EMAIL ? "admin" : undefined;
 
       try {
-        const snap = await getDoc(doc(db, "users", firebaseUser.uid));
-        const role = snap.data()?.role as Role | undefined;
-        setState({ user: firebaseUser, role, loading: false, demoMode: false });
+        const profile = await resolveProfileFromDb(firebaseUser.uid, firebaseUser.email);
+        const finalRole = profile.role || fallbackRole;
+        const profileName = profile.displayName || firebaseUser.displayName || firebaseUser.email || undefined;
+        setState({ user: firebaseUser, role: finalRole, profileName, loading: false, demoMode: false });
       } catch (error) {
         console.error("No se pudo obtener el rol del usuario", error);
-        setState({ user: firebaseUser, role: undefined, loading: false, demoMode: false });
+        setState({
+          user: firebaseUser,
+          role: fallbackRole,
+          profileName: firebaseUser.displayName || firebaseUser.email || undefined,
+          loading: false,
+          demoMode: false,
+        });
       }
     });
 
@@ -92,6 +154,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       return {
         user: toFirebaseUser(account),
         role: account.role,
+        profileName: account.displayName,
         loading: false,
         demoMode: true,
       };
@@ -100,7 +163,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
 
   const logout = async () => {
     if (!auth || !isFirebaseConfigured) {
-      setState({ user: null, role: undefined, loading: false, demoMode: true });
+      setState({ user: null, role: undefined, profileName: undefined, loading: false, demoMode: true });
       return;
     }
     try {

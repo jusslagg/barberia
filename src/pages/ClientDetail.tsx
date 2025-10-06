@@ -1,4 +1,4 @@
-﻿import { addDoc, collection, deleteDoc, deleteField, doc, getDocs, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
+import { addDoc, collection, deleteDoc, deleteField, doc, getDocs, onSnapshot, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import PhotoGrid from "../components/PhotoGrid";
@@ -6,6 +6,9 @@ import Uploader from "../components/Uploader";
 import { useAuth } from "../auth/AuthContext";
 import { db } from "../lib/firebase";
 import { deleteDemoClient, getDemoClient, listDemoPhotos, pushDemoPhoto, updateDemoClient } from "../lib/demoData";
+
+const CLIENTS_COLLECTION = "clientes";
+const CUTS_COLLECTION = "cuts";
 
 export default function ClientDetail() {
   const { id } = useParams();
@@ -33,14 +36,14 @@ export default function ClientDetail() {
       setClientExists(true);
       setForm({
         fullName: demoClient.fullName,
-        phone: demoClient.phone || "",
+        phone: demoClient.phone == null ? "" : String(demoClient.phone),
         notes: demoClient.notes || "",
       });
       setPhotos(listDemoPhotos(id));
       return;
     }
 
-    const unsubscribe = onSnapshot(doc(db, "clients", id), (snapshot) => {
+    const unsubscribe = onSnapshot(doc(db!, CLIENTS_COLLECTION, id), (snapshot) => {
       if (!snapshot.exists()) {
         setClientExists(false);
         return;
@@ -49,20 +52,26 @@ export default function ClientDetail() {
       setClientExists(true);
       setForm({
         fullName: data.fullName || "",
-        phone: data.phone || "",
+        phone: data.phone == null ? "" : String(data.phone),
         notes: data.notes || "",
       });
     });
 
     (async () => {
-      const qRef = query(collection(db, "cuts"), where("clientId", "==", id), orderBy("createdAt", "desc"));
+      const qRef = query(collection(db!, CUTS_COLLECTION), where("clientId", "==", id));
       const snap = await getDocs(qRef);
-      const list: string[] = [];
+      const list: { url: string; createdAt?: any }[] = [];
       snap.forEach((docSnap) => {
-        const items = (docSnap.data().photos || []) as string[];
-        items.forEach((url) => list.push(url));
+        const data = docSnap.data() as Record<string, any>;
+        const items = (data.photos || []) as string[];
+        items.forEach((url) => list.push({ url, createdAt: data.createdAt }));
       });
-      setPhotos(list.slice(0, 12));
+      list.sort((a, b) => {
+        const aTime = a.createdAt?.toMillis ? a.createdAt.toMillis() : Number(a.createdAt) || 0;
+        const bTime = b.createdAt?.toMillis ? b.createdAt.toMillis() : Number(b.createdAt) || 0;
+        return bTime - aTime;
+      });
+      setPhotos(list.map((item) => item.url).slice(0, 12));
     })();
 
     return () => unsubscribe();
@@ -84,7 +93,7 @@ export default function ClientDetail() {
       pushDemoPhoto(id, url);
       return;
     }
-    await addDoc(collection(db, "cuts"), {
+    await addDoc(collection(db!, CUTS_COLLECTION), {
       clientId: id,
       barberId: user?.uid || "",
       photos: [url],
@@ -94,8 +103,8 @@ export default function ClientDetail() {
 
   const saveClient = async () => {
     if (!id) return;
-    const fullName = form.fullName.trim();
-    const phone = form.phone.trim();
+    const fullName = (form.fullName ?? "").toString().trim();
+    const phone = (form.phone ?? "").toString().trim();
 
     if (!fullName) {
       setErrorMsg("El nombre es obligatorio.");
@@ -119,7 +128,7 @@ export default function ClientDetail() {
         } else {
           payload.phone = deleteField();
         }
-        await updateDoc(doc(db, "clients", id), payload);
+        await updateDoc(doc(db!, CLIENTS_COLLECTION, id), payload);
       }
     } catch (error) {
       console.error("No pudimos actualizar el cliente", error);
@@ -141,7 +150,7 @@ export default function ClientDetail() {
       if (isDemo) {
         deleteDemoClient(id);
       } else {
-        await deleteDoc(doc(db, "clients", id));
+        await deleteDoc(doc(db!, CLIENTS_COLLECTION, id));
       }
       navigate("/clientes");
     } catch (error) {
@@ -155,8 +164,8 @@ export default function ClientDetail() {
     return <div className="panel text-[var(--ink)]">No encontramos este cliente.</div>;
   }
 
-  const displayName = form.fullName.trim() || "Cliente sin nombre";
-  const phoneText = form.phone.trim();
+  const displayName = (form.fullName ?? "").toString().trim() || "Cliente sin nombre";
+  const phoneText = (form.phone ?? "").toString().trim();
 
   return (
     <div className="panel space-y-8">
@@ -243,3 +252,9 @@ export default function ClientDetail() {
     </div>
   );
 }
+
+
+
+
+
+

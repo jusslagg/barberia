@@ -5,10 +5,11 @@ import { db } from "../lib/firebase";
 import { createDemoUser, deleteDemoUser, listDemoUsers, updateDemoUser } from "../lib/demoData";
 import type { Role } from "../types";
 
-type Row = { id: string; displayName?: string; email?: string; role?: Role };
+type Row = { id: string; displayName?: string; email?: string; emailLower?: string; role?: Role };
 
 type FormState = { id?: string; displayName: string; email: string; role: Role };
 
+const BARBERS_COLLECTION = "barberos";
 const emptyForm: FormState = { displayName: "", email: "", role: "barbero" };
 
 export default function AdminUsers() {
@@ -28,14 +29,20 @@ export default function AdminUsers() {
     }
 
     const load = async () => {
-      const snap = await getDocs(query(collection(db, "users"), orderBy("displayName")));
+      const snap = await getDocs(query(collection(db!, BARBERS_COLLECTION), orderBy("displayName")));
       setRows(snap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as any) })));
     };
 
     void load();
   }, [db]);
 
-  const filtered = rows.filter((item) => (item.displayName || item.email || "").toLowerCase().includes(qText.toLowerCase()));
+  const searchTerm = qText.trim().toLowerCase();
+  const filtered = rows.filter((item) => {
+    if (!searchTerm) return true;
+    const nameMatch = (item.displayName || "").toLowerCase().includes(searchTerm);
+    const emailMatch = (item.emailLower || item.email?.toLowerCase() || "").includes(searchTerm);
+    return nameMatch || emailMatch;
+  });
 
   const openForm = (row?: Row) => {
     if (row) {
@@ -49,42 +56,44 @@ export default function AdminUsers() {
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!form.displayName.trim() || !form.email.trim()) {
+    const displayName = form.displayName.trim();
+    const email = form.email.trim();
+
+    if (!displayName || !email) {
       setErrorMsg("Nombre y correo son obligatorios.");
       return;
     }
 
+    const emailLower = email.toLowerCase();
     setSaving(true);
     setErrorMsg(null);
 
     try {
       if (!db) {
         if (form.id) {
-          updateDemoUser(form.id, {
-            displayName: form.displayName.trim(),
-            email: form.email.trim(),
-            role: form.role,
-          });
+          updateDemoUser(form.id, { displayName, email, role: form.role });
         } else {
-          createDemoUser({ displayName: form.displayName.trim(), email: form.email.trim(), role: form.role });
+          createDemoUser({ displayName, email, role: form.role });
         }
         setRows(listDemoUsers());
       } else if (form.id) {
-        await updateDoc(doc(db, "users", form.id), {
-          displayName: form.displayName.trim(),
-          email: form.email.trim(),
+        await updateDoc(doc(db!, BARBERS_COLLECTION, form.id), {
+          displayName,
+          email,
+          emailLower,
           role: form.role,
         });
         setRows((prev) =>
-          prev.map((row) => (row.id === form.id ? { ...row, ...form, displayName: form.displayName.trim(), email: form.email.trim() } : row))
+          prev.map((row) => (row.id === form.id ? { ...row, displayName, email, emailLower, role: form.role } : row))
         );
       } else {
-        const newDoc = await addDoc(collection(db, "users"), {
-          displayName: form.displayName.trim(),
-          email: form.email.trim(),
+        const newDoc = await addDoc(collection(db!, BARBERS_COLLECTION), {
+          displayName,
+          email,
+          emailLower,
           role: form.role,
         });
-        setRows((prev) => [{ id: newDoc.id, ...form, displayName: form.displayName.trim(), email: form.email.trim() }, ...prev]);
+        setRows((prev) => [{ id: newDoc.id, displayName, email, emailLower, role: form.role }, ...prev]);
       }
       setShowForm(false);
       setForm(emptyForm);
@@ -102,12 +111,19 @@ export default function AdminUsers() {
       setRows(listDemoUsers());
       return;
     }
-    await updateDoc(doc(db, "users", id), { role: newRole });
+    await updateDoc(doc(db!, BARBERS_COLLECTION, id), { role: newRole });
     setRows((prev) => prev.map((row) => (row.id === id ? { ...row, role: newRole } : row)));
   };
 
   const removeUser = async (id: string) => {
-    const confirmed = window.confirm("Seguro que deseas eliminar este usuario?");
+    const target = rows.find((row) => row.id === id);
+    if (!target || target.role !== "barbero") {
+      window.alert("Solo puedes eliminar perfiles con rol barbero. Si necesitas quitar a un admin, cambia su rol primero.");
+      return;
+    }
+
+    const label = target.displayName || target.email || id;
+    const confirmed = window.confirm(`Seguro que deseas eliminar al barbero ${label}?`);
     if (!confirmed) return;
 
     try {
@@ -115,7 +131,7 @@ export default function AdminUsers() {
         deleteDemoUser(id);
         setRows(listDemoUsers());
       } else {
-        await deleteDoc(doc(db, "users", id));
+        await deleteDoc(doc(db!, BARBERS_COLLECTION, id));
         setRows((prev) => prev.filter((row) => row.id !== id));
       }
     } catch (error) {
@@ -139,7 +155,7 @@ export default function AdminUsers() {
           <span className="text-xs uppercase tracking-[0.5em] text-[var(--ink-soft)]">Equipo</span>
           <h1 className="text-3xl font-semibold text-[var(--ink)]">Administracion de usuarios</h1>
           <p className="text-sm text-[var(--ink-soft)] max-w-2xl">
-            Agrega barberos, otorga permisos de administrador y mantén actualizado el directorio interno.
+            Agrega barberos, otorga permisos de administrador y manten actualizado el directorio interno.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -149,7 +165,7 @@ export default function AdminUsers() {
             value={qText}
             onChange={(event) => setQText(event.target.value)}
           />
-          <button className="btn btn-primary" onClick={() => openForm()}>
+          <button className="btn btn-primary w-full sm:w-auto" onClick={() => openForm()}>
             Nuevo usuario
           </button>
         </div>
@@ -191,10 +207,10 @@ export default function AdminUsers() {
           </div>
           {errorMsg && <p className="text-xs text-red-500">{errorMsg}</p>}
           <div className="flex flex-wrap gap-2">
-            <button className="btn btn-primary" type="submit" disabled={saving}>
+            <button className="btn btn-primary w-full sm:w-auto" type="submit" disabled={saving}>
               {saving ? "Guardando..." : form.id ? "Actualizar" : "Agregar"}
             </button>
-            <button className="btn btn-ghost" type="button" onClick={() => setShowForm(false)}>
+            <button className="btn btn-ghost w-full sm:w-auto" type="button" onClick={() => setShowForm(false)}>
               Cancelar
             </button>
           </div>
@@ -203,7 +219,7 @@ export default function AdminUsers() {
       )}
 
       <div className="overflow-x-auto">
-        <table className="min-w-full text-sm text-[var(--ink)]">
+        <table className="responsive-table text-sm text-[var(--ink)]">
           <thead>
             <tr className="text-left text-[var(--ink-soft)]">
               <th className="py-2 pr-3 font-semibold">Nombre</th>
@@ -215,25 +231,27 @@ export default function AdminUsers() {
           <tbody className="divide-y divide-[rgba(44,21,10,0.08)]">
             {filtered.map((userRow) => (
               <tr key={userRow.id} className="bg-[rgba(244,237,225,0.85)]">
-                <td className="py-3 pr-3 font-medium">{userRow.displayName || "-"}</td>
-                <td className="py-3 pr-3">{userRow.email || "-"}</td>
-                <td className="py-3 pr-3 uppercase tracking-[0.25em] text-xs">{userRow.role}</td>
-                <td className="py-3">
-                  <div className="flex flex-wrap gap-2">
+                <td className="py-3 pr-3 font-medium" data-label="Nombre">{userRow.displayName || "-"}</td>
+                <td className="py-3 pr-3" data-label="Email">{userRow.email || "-"}</td>
+                <td className="py-3 pr-3 uppercase tracking-[0.25em] text-xs" data-label="Rol">{userRow.role}</td>
+                <td className="py-3 actions-cell" data-label="Acciones">
+                  <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 w-full">
                     <select
-                      className="input max-w-[130px]"
+                      className="input w-full sm:max-w-[130px]"
                       value={userRow.role}
                       onChange={(event) => changeRole(userRow.id, event.target.value as Role)}
                     >
                       <option value="barbero">barbero</option>
                       <option value="admin">admin</option>
                     </select>
-                    <button className="btn btn-ghost" type="button" onClick={() => openForm(userRow)}>
+                    <button className="btn btn-ghost w-full sm:w-auto" type="button" onClick={() => openForm(userRow)}>
                       Editar
                     </button>
-                    <button className="btn btn-ghost" type="button" onClick={() => void removeUser(userRow.id)}>
-                      Eliminar
-                    </button>
+                    {userRow.role === "barbero" && (
+                      <button className="btn btn-ghost w-full sm:w-auto" type="button" onClick={() => void removeUser(userRow.id)}>
+                        Eliminar
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -249,3 +267,6 @@ export default function AdminUsers() {
     </div>
   );
 }
+
+
+
