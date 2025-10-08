@@ -208,15 +208,13 @@ export default function AdminUsers() {
 
   const removeUser = async (id: string) => {
     const target = rows.find((row) => row.id === id);
-    if (!target) return;
-
-    if (target.role === "admin") {
-      window.alert("No puedes eliminar perfiles con rol admin desde aquí.");
+    if (!target || target.role !== "barbero") {
+      window.alert("Solo puedes eliminar perfiles con rol barbero. Si necesitas quitar a un admin, cambia su rol primero.");
       return;
     }
 
     const label = target.displayName || target.email || id;
-    const confirmed = window.confirm(`Seguro que deseas eliminar a ${label}?`);
+    const confirmed = window.confirm(`Seguro que deseas eliminar al barbero ${label}?`);
     if (!confirmed) return;
 
     try {
@@ -361,14 +359,11 @@ export default function AdminUsers() {
                     <button className="btn btn-ghost w-full sm:w-auto" type="button" onClick={() => openForm(userRow)}>
                       Editar
                     </button>
-                    <button
-                      className="w-full sm:w-auto rounded-full px-4 py-2 text-sm font-semibold text-white bg-red-500 hover:bg-red-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                      type="button"
-                      onClick={() => void removeUser(userRow.id)}
-                      disabled={userRow.role === "admin"}
-                    >
-                      Eliminar
-                    </button>
+                    {userRow.role === "barbero" && (
+                      <button className="btn btn-ghost w-full sm:w-auto" type="button" onClick={() => void removeUser(userRow.id)}>
+                        Eliminar
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -384,8 +379,6 @@ export default function AdminUsers() {
     </div>
   );
 }
-
-
 
 
 

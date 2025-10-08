@@ -55,11 +55,33 @@ const normalizeEmail = (email?: string | null) => email?.trim().toLowerCase() ||
 
 type ResolvedProfile = { role?: Role; displayName?: string };
 
+const normalizeRoleValue = (value: unknown): Role | undefined => {
+  if (!value) return undefined;
+  const normalized = String(value).trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (["admin", "administrador", "administrator"].includes(normalized)) return "admin";
+  if (normalized === "barbero" || normalized === "barberos") return "barbero";
+  if (normalized.startsWith("barber")) return "barbero";
+  return undefined;
+};
+
+const resolveRoleFromDoc = (data: Record<string, any> | undefined, originCollection?: string): Role | undefined => {
+  const normalized = normalizeRoleValue(data?.role);
+  if (normalized) return normalized;
+  if (originCollection === BARBERS_COLLECTION) return "barbero";
+  return undefined;
+};
+
 const extractName = (data: Record<string, any> | undefined | null): string | undefined => {
   if (!data) return undefined;
   const primary = data.displayName || data.nombre || data.Nombre;
   const last = data.lastName || data.apellido || data.Apellido;
-  if (primary && last) return `${primary} ${last}`.trim();
+  if (primary && last) {
+    const primaryNorm = String(primary).trim();
+    const lastNorm = String(last).trim();
+    if (primaryNorm.toLowerCase().endsWith(lastNorm.toLowerCase())) return primaryNorm;
+    return `${primaryNorm} ${lastNorm}`.trim();
+  }
   if (primary) return primary;
   if (last) return last;
   return undefined;
@@ -70,32 +92,41 @@ const resolveProfileFromDb = async (uid: string, email?: string | null): Promise
 
   const userDoc = await getDoc(doc(db!, USERS_COLLECTION, uid));
   const directData = userDoc.data() as Record<string, any> | undefined;
-  const directRole = (directData?.role as Role | undefined) || undefined;
+  const directRole = resolveRoleFromDoc(directData, USERS_COLLECTION);
   const directName = extractName(directData);
   if (directRole || directName) return { role: directRole, displayName: directName };
 
   const normalizedEmail = normalizeEmail(email);
-  if (normalizedEmail) {
-    const queries = [
-      query(collection(db!, USERS_COLLECTION), where("email", "==", normalizedEmail), limit(1)),
-      query(collection(db!, BARBERS_COLLECTION), where("email", "==", normalizedEmail), limit(1)),
-    ];
+  const identityQueries = [
+    query(collection(db!, USERS_COLLECTION), where("uid", "==", uid), limit(1)),
+    query(collection(db!, BARBERS_COLLECTION), where("uid", "==", uid), limit(1)),
+  ];
+  const emailQueries =
+    normalizedEmail == null
+      ? []
+      : [
+          query(collection(db!, USERS_COLLECTION), where("email", "==", normalizedEmail), limit(1)),
+          query(collection(db!, USERS_COLLECTION), where("emailLower", "==", normalizedEmail), limit(1)),
+          query(collection(db!, BARBERS_COLLECTION), where("email", "==", normalizedEmail), limit(1)),
+          query(collection(db!, BARBERS_COLLECTION), where("emailLower", "==", normalizedEmail), limit(1)),
+        ];
+  const queriesToRun = [...identityQueries, ...emailQueries];
 
-    for (const qRef of queries) {
-      const snap = await getDocs(qRef);
-      const docSnap = snap.docs[0];
-      if (docSnap) {
-        const data = docSnap.data() as Record<string, any> | undefined;
-        const role = (data?.role as Role | undefined) || undefined;
-        const name = extractName(data);
-        if (role || name) return { role, displayName: name };
-      }
+  for (const qRef of queriesToRun) {
+    const snap = await getDocs(qRef);
+    const docSnap = snap.docs[0];
+    if (docSnap) {
+      const data = docSnap.data() as Record<string, any> | undefined;
+      const collectionName = docSnap.ref.parent.id;
+      const role = resolveRoleFromDoc(data, collectionName);
+      const name = extractName(data);
+      if (role || name) return { role, displayName: name };
     }
   }
 
   const barberDoc = await getDoc(doc(db!, BARBERS_COLLECTION, uid));
   const barberData = barberDoc.data() as Record<string, any> | undefined;
-  const role = (barberData?.role as Role | undefined) || undefined;
+  const role = resolveRoleFromDoc(barberData, BARBERS_COLLECTION);
   const name = extractName(barberData);
   return { role, displayName: name };
 };
@@ -128,17 +159,18 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       }
 
       const fallbackRole = normalizeEmail(firebaseUser.email) === FALLBACK_ADMIN_EMAIL ? "admin" : undefined;
+      const fallbackRoleNormalized = normalizeRoleValue(fallbackRole);
 
       try {
         const profile = await resolveProfileFromDb(firebaseUser.uid, firebaseUser.email);
-        const finalRole = profile.role || fallbackRole;
+        const resolvedRole = profile.role || fallbackRoleNormalized || "barbero";
         const profileName = profile.displayName || firebaseUser.displayName || firebaseUser.email || undefined;
-        setState({ user: firebaseUser, role: finalRole, profileName, loading: false, demoMode: false });
+        setState({ user: firebaseUser, role: resolvedRole, profileName, loading: false, demoMode: false });
       } catch (error) {
         console.error("No se pudo obtener el rol del usuario", error);
         setState({
           user: firebaseUser,
-          role: fallbackRole,
+          role: fallbackRoleNormalized || "barbero",
           profileName: firebaseUser.displayName || firebaseUser.email || undefined,
           loading: false,
           demoMode: false,
