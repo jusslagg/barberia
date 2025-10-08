@@ -26,14 +26,20 @@ const isFirebaseConfigured = Object.values(firebaseConfig).every(Boolean);
 let app: FirebaseApp | undefined;
 let auth: Auth | null = null;
 let db: Firestore | null = null;
+let resolvedFirebase = isFirebaseConfigured;
 
 if (isFirebaseConfigured) {
-  app = initializeApp(firebaseConfig);
-  auth = getAuth(app);
-  db = getFirestore(app);
+  try {
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+  } catch (error) {
+    resolvedFirebase = false;
+    console.error("No se pudo inicializar Firebase, se usara modo demostracion.", error);
+  }
 } else if (import.meta.env.DEV) {
   console.warn("Firebase config faltante: ejecutando en modo demostracion");
 }
 
-export { auth, db, isFirebaseConfigured };
+export { auth, db, resolvedFirebase as isFirebaseConfigured };
 
