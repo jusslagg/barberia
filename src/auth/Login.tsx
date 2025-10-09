@@ -90,6 +90,15 @@ const persistProfileLink = async (profile: ReservedProfile, uid: string, email: 
   await updateDoc(ref, payload).catch(() => undefined);
 };
 
+const normalizeSeedValue = (value: unknown) => {
+  if (value == null) return "";
+  const normalized = String(value)
+    .normalize("NFKC")
+    .replace(/^[\s"'`´]+|[\s"'`´]+$/g, "")
+    .trim();
+  return normalized;
+};
+
 export default function Login() {
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
@@ -144,21 +153,23 @@ export default function Login() {
             return;
           }
 
-          const seedPassword = String(reserved.data.passwordSeed ?? reserved.data.dni ?? "").trim();
-          if (!seedPassword) {
+          const seedPasswordRaw = reserved.data.passwordSeed ?? reserved.data.dni ?? "";
+          const normalizedSeed = normalizeSeedValue(seedPasswordRaw);
+          if (!normalizedSeed) {
             setErrorMsg("Tu perfil reservado no tiene un DNI configurado. Contacta al administrador.");
             setSubmitting(false);
             return;
           }
 
-          if (passwordTrimmed !== seedPassword) {
-            setErrorMsg("Tu contrase�a inicial es tu DNI registrado.");
+          const normalizedInput = normalizeSeedValue(passwordTrimmed);
+          if (normalizedInput !== normalizedSeed) {
+            setErrorMsg("Tu contraseña inicial es tu DNI registrado.");
             setSubmitting(false);
             return;
           }
 
           try {
-            const credential = await createUserWithEmailAndPassword(auth, emailTrimmed, seedPassword);
+            const credential = await createUserWithEmailAndPassword(auth, emailTrimmed, normalizedSeed);
             const profileName = extractDisplayName(reserved.data);
             if (profileName) {
               await updateProfile(credential.user, { displayName: profileName }).catch(() => undefined);
@@ -207,15 +218,16 @@ export default function Login() {
             setResetMsg(null);
             return;
           }
-          const seedPassword = String(reserved.data.passwordSeed ?? reserved.data.dni ?? "").trim();
-          if (!seedPassword) {
+          const seedPasswordRaw = reserved.data.passwordSeed ?? reserved.data.dni ?? "";
+          const normalizedSeed = normalizeSeedValue(seedPasswordRaw);
+          if (!normalizedSeed) {
             setErrorMsg("Tu perfil reservado no tiene un DNI configurado. Contacta al administrador.");
             setResetMsg(null);
             return;
           }
           let createdAccount = false;
           try {
-            const credential = await createUserWithEmailAndPassword(auth, emailTrimmed, seedPassword);
+            const credential = await createUserWithEmailAndPassword(auth, emailTrimmed, normalizedSeed);
             const profileName = extractDisplayName(reserved.data);
             if (profileName) {
               await updateProfile(credential.user, { displayName: profileName }).catch(() => undefined);

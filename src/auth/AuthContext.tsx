@@ -1,6 +1,7 @@
 
 import { signOut } from "firebase/auth";
 import { collection, doc, getDoc, getDocs, limit, query, where } from "firebase/firestore";
+import type { DocumentReference, Query as FirestoreQuery } from "firebase/firestore";
 import { createContext, useContext, useEffect, useState } from "react";
 import type { User } from "firebase/auth";
 import type { Role } from "../types";
@@ -68,7 +69,7 @@ const normalizeRoleValue = (value: unknown): Role | undefined => {
 const resolveRoleFromDoc = (data: Record<string, any> | undefined, originCollection?: string): Role | undefined => {
   const normalized = normalizeRoleValue(data?.role);
   if (normalized) return normalized;
-  if (originCollection === BARBERS_COLLECTION) return "barbero";
+  if (originCollection === BARBERS_COLLECTION && data) return "barbero";
   return undefined;
 };
 
@@ -90,45 +91,93 @@ const extractName = (data: Record<string, any> | undefined | null): string | und
 const resolveProfileFromDb = async (uid: string, email?: string | null): Promise<ResolvedProfile> => {
   if (!db) return {};
 
-  const userDoc = await getDoc(doc(db!, USERS_COLLECTION, uid));
-  const directData = userDoc.data() as Record<string, any> | undefined;
-  const directRole = resolveRoleFromDoc(directData, USERS_COLLECTION);
-  const directName = extractName(directData);
-  if (directRole || directName) return { role: directRole, displayName: directName };
+  const isPermissionError = (error: unknown) => {
+    if (typeof error !== "object" || !error || !("code" in error)) return false;
+    const code = String((error as { code?: string }).code || "").toLowerCase();
+    return code === "permission-denied" || code === "missing-permission";
+  };
 
-  const normalizedEmail = normalizeEmail(email);
-  const identityQueries = [
-    query(collection(db!, USERS_COLLECTION), where("uid", "==", uid), limit(1)),
-    query(collection(db!, BARBERS_COLLECTION), where("uid", "==", uid), limit(1)),
-  ];
-  const emailQueries =
-    normalizedEmail == null
-      ? []
-      : [
-          query(collection(db!, USERS_COLLECTION), where("email", "==", normalizedEmail), limit(1)),
-          query(collection(db!, USERS_COLLECTION), where("emailLower", "==", normalizedEmail), limit(1)),
-          query(collection(db!, BARBERS_COLLECTION), where("email", "==", normalizedEmail), limit(1)),
-          query(collection(db!, BARBERS_COLLECTION), where("emailLower", "==", normalizedEmail), limit(1)),
-        ];
-  const queriesToRun = [...identityQueries, ...emailQueries];
-
-  for (const qRef of queriesToRun) {
-    const snap = await getDocs(qRef);
-    const docSnap = snap.docs[0];
-    if (docSnap) {
-      const data = docSnap.data() as Record<string, any> | undefined;
-      const collectionName = docSnap.ref.parent.id;
-      const role = resolveRoleFromDoc(data, collectionName);
-      const name = extractName(data);
-      if (role || name) return { role, displayName: name };
+  async function safeGetDoc<T>(ref: DocumentReference<T>) {
+    try {
+      return await getDoc(ref);
+    } catch (error) {
+      if (isPermissionError(error)) {
+        console.warn("No pudimos leer el documento por permisos insuficientes", error);
+        return null;
+      }
+      throw error;
     }
   }
 
-  const barberDoc = await getDoc(doc(db!, BARBERS_COLLECTION, uid));
-  const barberData = barberDoc.data() as Record<string, any> | undefined;
-  const role = resolveRoleFromDoc(barberData, BARBERS_COLLECTION);
-  const name = extractName(barberData);
-  return { role, displayName: name };
+  async function safeGetDocs<T>(qRef: FirestoreQuery<T>) {
+    try {
+      return await getDocs(qRef);
+    } catch (error) {
+      if (isPermissionError(error)) {
+        console.warn("No pudimos consultar la coleccion por permisos insuficientes", error);
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  const evaluateProfile = (
+    data: Record<string, any> | undefined,
+    originCollection?: string
+  ): { role?: Role; displayName?: string; isAdmin: boolean } => {
+    const role = resolveRoleFromDoc(data, originCollection);
+    const name = extractName(data);
+    return { role, displayName: name, isAdmin: role === "admin" };
+  };
+
+  let resolvedRole: Role | undefined;
+  let resolvedName: string | undefined;
+
+  const userDoc = await safeGetDoc(doc(db!, USERS_COLLECTION, uid));
+  if (userDoc?.exists()) {
+    const candidate = evaluateProfile(userDoc.data() as Record<string, any>, USERS_COLLECTION);
+    if (candidate.role || candidate.displayName) {
+      resolvedRole = candidate.role ?? resolvedRole;
+      resolvedName = candidate.displayName ?? resolvedName;
+      if (candidate.isAdmin) return { role: candidate.role, displayName: candidate.displayName };
+    }
+  }
+
+  const normalizedEmail = normalizeEmail(email);
+  const queries = [
+    query(collection(db!, USERS_COLLECTION), where("uid", "==", uid), limit(5)),
+    query(collection(db!, BARBERS_COLLECTION), where("uid", "==", uid), limit(5)),
+  ];
+  if (normalizedEmail != null) {
+    queries.push(
+      query(collection(db!, USERS_COLLECTION), where("email", "==", normalizedEmail), limit(5)),
+      query(collection(db!, USERS_COLLECTION), where("emailLower", "==", normalizedEmail), limit(5)),
+      query(collection(db!, BARBERS_COLLECTION), where("email", "==", normalizedEmail), limit(5)),
+      query(collection(db!, BARBERS_COLLECTION), where("emailLower", "==", normalizedEmail), limit(5)),
+    );
+  }
+
+  for (const qRef of queries) {
+    const snap = await safeGetDocs(qRef);
+    if (!snap) continue;
+    for (const docSnap of snap.docs) {
+      const candidate = evaluateProfile(docSnap.data() as Record<string, any>, docSnap.ref.parent.id);
+      if (candidate.role && !resolvedRole) resolvedRole = candidate.role;
+      if (candidate.displayName && !resolvedName) resolvedName = candidate.displayName;
+      if (candidate.isAdmin) return { role: candidate.role, displayName: candidate.displayName };
+    }
+  }
+
+  const barberDoc = await safeGetDoc(doc(db!, BARBERS_COLLECTION, uid));
+  if (barberDoc?.exists()) {
+    const candidate = evaluateProfile(barberDoc.data() as Record<string, any>, BARBERS_COLLECTION);
+    if (candidate.role || candidate.displayName) {
+      resolvedRole = resolvedRole ?? candidate.role;
+      resolvedName = resolvedName ?? candidate.displayName;
+    }
+  }
+
+  return { role: resolvedRole, displayName: resolvedName };
 };
 
 const toFirebaseUser = (demo: DemoUser): User =>

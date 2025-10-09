@@ -1,14 +1,14 @@
-import { initializeApp, type FirebaseApp } from "firebase/app";
+import { getApp, getApps, initializeApp, type FirebaseApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
-import { getFirestore, type Firestore } from "firebase/firestore";
+import { getFirestore, initializeFirestore, type Firestore } from "firebase/firestore";
 
 const fallbackConfig = {
-  apiKey: "AIzaSyA4u7-XvftUsvQ8E5J9QUEI4PMpkBo40pc",
-  authDomain: "barberia-c67cc.firebaseapp.com",
-  projectId: "barberia-c67cc",
-  storageBucket: "barberia-c67cc.firebasestorage.app",
-  messagingSenderId: "267606874921",
-  appId: "1:267606874921:web:cb12c2bafa09d725623538",
+  apiKey: "AIzaSyBhrcZwtoUXgdlh1o9hmVN3COZjuKBW4lM",
+  authDomain: "barberia-20938.firebaseapp.com",
+  projectId: "barberia-20938",
+  storageBucket: "barberia-20938.firebasestorage.app",
+  messagingSenderId: "846907688289",
+  appId: "1:846907688289:web:cd14404104465d72d17120",
 };
 
 
@@ -30,9 +30,26 @@ let resolvedFirebase = isFirebaseConfigured;
 
 if (isFirebaseConfigured) {
   try {
-    app = initializeApp(firebaseConfig);
+    app = getApps().length ? getApp() : initializeApp(firebaseConfig);
     auth = getAuth(app);
-    db = getFirestore(app);
+    try {
+      const firestoreSettings = {
+        experimentalForceLongPolling: true,
+        useFetchStreams: false,
+      } as Record<string, unknown>;
+      db = initializeFirestore(app, {
+        ...firestoreSettings,
+      } as Parameters<typeof initializeFirestore>[1]);
+    } catch (firestoreError) {
+      const code =
+        typeof firestoreError === "object" && firestoreError && "code" in firestoreError
+          ? String((firestoreError as { code?: string }).code || "").toLowerCase()
+          : "";
+      if (code !== "failed-precondition") {
+        throw firestoreError;
+      }
+      db = getFirestore(app);
+    }
   } catch (error) {
     resolvedFirebase = false;
     console.error("No se pudo inicializar Firebase, se usara modo demostracion.", error);
