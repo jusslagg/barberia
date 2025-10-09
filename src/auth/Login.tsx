@@ -100,6 +100,7 @@ export default function Login() {
   const { user, role, loading } = useAuth();
 
   const resolvedHome = role === "admin" ? "/admin/usuarios" : "/clientes";
+  const logoSrc = `${import.meta.env.BASE_URL}images/logo.png`;
 
   const validateEmail = (value: string) => emailPattern.test(value.trim());
 
@@ -253,9 +254,10 @@ export default function Login() {
     <div className="login-hero">
       <div className="login-hero-inner">
         <div className="space-y-4 text-center">
-          <span className="login-eyebrow">Acceso interno</span>
-          <h1 className="login-heading">Barberia Prueba</h1>
-          <p className="text-base text-black/70 max-w-xl mx-auto">Gestiona operaciones, clientes y equipo en un panel profesional disenado para administradores y barberos.</p>
+          <div className="look-fusion-lockup">
+            <img src={logoSrc} alt="Logotipo Look Fusion" className="look-fusion-logo" />
+            <h1 className="login-heading look-fusion-wordmark">LOOK FUSION</h1>
+          </div>
         </div>
 
         <div className="login-card">
@@ -332,10 +334,5 @@ export default function Login() {
     </div>
   );
 }
-
-
-
-
-
 
 

@@ -11,6 +11,7 @@ export default function Layout({ children }: Props) {
   const userName = profileName || user?.displayName || user?.email || roleLabel || "Perfil";
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
+  const logoSrc = `${import.meta.env.BASE_URL}images/logo.png`;
 
   const navClass = ({ isActive }: { isActive: boolean }) => `nav-pill${isActive ? " active" : ""}`;
   const homePath = role === "admin" ? "/admin/usuarios" : "/clientes";
@@ -30,7 +31,8 @@ export default function Layout({ children }: Props) {
         <div className="inner">
           <div className="navbar-heading">
             <Link to={homePath} className="brand" onClick={closeMenu}>
-              Barberia Prueba
+              <img src={logoSrc} alt="Logotipo Look Fusion" className="brand-logo" />
+              <span className="brand-wordmark">LOOK FUSION</span>
             </Link>
             <button
               type="button"

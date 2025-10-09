@@ -83,11 +83,28 @@ body {
 }
 
 .brand {
-  font-family: "Georgia", "Times New Roman", serif;
-  font-size: clamp(1.6rem, 3vw, 2rem);
-  letter-spacing: 0.05em;
-  color: #fdf6ec;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
   text-decoration: none;
+  color: inherit;
+}
+
+.brand-logo {
+  width: clamp(42px, 4vw, 52px);
+  height: auto;
+  display: block;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.45));
+}
+
+.brand-wordmark {
+  font-family: "Oswald", "Impact", "Poppins", sans-serif;
+  font-size: clamp(1.6rem, 3vw, 2.2rem);
+  font-weight: 900;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #ffca28;
+  text-shadow: -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000;
 }
 
 .navbar-heading {
@@ -436,11 +453,33 @@ body {
 
 .login-heading {
   font-size: clamp(2.5rem, 5vw, 4rem);
-  font-weight: 700;
-  font-family: "Georgia", "Times New Roman", serif;
   text-align: center;
-  color: #fdf6ec;
+  margin: 0;
 }
+
+.look-fusion-lockup {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(1rem, 3vw, 2rem);
+}
+
+.look-fusion-logo {
+  width: clamp(120px, 20vw, 180px);
+  height: auto;
+  display: block;
+  filter: drop-shadow(0 12px 26px rgba(0, 0, 0, 0.5));
+}
+
+.look-fusion-wordmark {
+  font-family: "Oswald", "Impact", "Poppins", sans-serif;
+  font-weight: 900;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: #ffca28;
+  text-shadow: -3px -3px 0 #000, 3px -3px 0 #000, -3px 3px 0 #000, 3px 3px 0 #000;
+}
+
 
 .login-badge {
   display: inline-flex;
