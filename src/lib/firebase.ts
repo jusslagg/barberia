@@ -3,12 +3,12 @@ import { getAuth, type Auth } from "firebase/auth";
 import { getFirestore, type Firestore } from "firebase/firestore";
 
 const fallbackConfig = {
-  apiKey: "AIzaSyDMJN4-PWQMH-8PFmr9nL0kNdI2hr5DY9E",
-  authDomain: "barberia-7ac00.firebaseapp.com",
-  projectId: "barberia-7ac00",
-  storageBucket: "barberia-7ac00.firebasestorage.app",
-  messagingSenderId: "301206293641",
-  appId: "1:301206293641:web:6d31c24c1331398ebdca58",
+  apiKey: "AIzaSyA4u7-XvftUsvQ8E5J9QUEI4PMpkBo40pc",
+  authDomain: "barberia-c67cc.firebaseapp.com",
+  projectId: "barberia-c67cc",
+  storageBucket: "barberia-c67cc.firebasestorage.app",
+  messagingSenderId: "267606874921",
+  appId: "1:267606874921:web:cb12c2bafa09d725623538",
 };
 
 
@@ -42,4 +42,3 @@ if (isFirebaseConfigured) {
 }
 
 export { auth, db, resolvedFirebase as isFirebaseConfigured };
-
