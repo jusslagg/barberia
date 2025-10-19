@@ -6,6 +6,7 @@ import { useAuth } from "../auth/AuthContext";
 import { db } from "../lib/firebase";
 import { createDemoClient, listDemoClients } from "../lib/demoData";
 import type { Client } from "../types";
+import { notesToSearchText, toNoteOptionArray } from "../utils/noteOptions";
 
 const CLIENTS_COLLECTION = "clientes";
 
@@ -22,7 +23,7 @@ const normalizeClient = (docId: string, raw: Record<string, any>, fallbackOwner?
     fullName_lower: raw.fullName_lower || fullName.toLowerCase(),
     phone: raw.phone || raw.telefono || raw.Telefono || "",
     mainBarberId,
-    notes: raw.notes || raw.Informacion || raw.info || "",
+    notes: toNoteOptionArray(raw.notes ?? raw.Informacion ?? raw.info),
     createdAt: raw.createdAt ?? null,
   };
 };
@@ -36,7 +37,7 @@ const applyFilters = (source: Client[], text: string, onlyMine: boolean, ownerId
     if (!query) return true;
     const name = (client.fullName || "").toLowerCase();
     const phone = (client.phone || "").toLowerCase();
-    const notes = (client.notes || "").toLowerCase();
+    const notes = notesToSearchText(client.notes).toLowerCase();
     return name.includes(query) || phone.includes(query) || notes.includes(query);
   });
 };
@@ -133,7 +134,7 @@ export default function ClientsList() {
           fullName_lower: fullName.toLowerCase(),
           phone: phone || undefined,
           mainBarberId: user?.uid || "",
-          notes: "",
+          notes: [],
           createdAt: serverTimestamp(),
         });
         await fetchClients();

@@ -28,6 +28,8 @@ import {
   updateDemoClient,
   type DemoPhoto,
 } from "../lib/demoData";
+import { NOTE_OPTIONS, type NoteOption } from "../types";
+import { NOTE_LABELS, toNoteOptionArray } from "../utils/noteOptions";
 
 const CLIENTS_COLLECTION = "clientes";
 const CUTS_COLLECTION = "cuts";
@@ -46,12 +48,18 @@ type ClientPhoto = PhotoItem & {
   demoId?: string;
 };
 
+type ClientFormState = {
+  fullName: string;
+  phone: string;
+  notes: NoteOption[];
+};
+
 export default function ClientDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user, role, demoMode } = useAuth();
   const [photos, setPhotos] = useState<ClientPhoto[]>([]);
-  const [form, setForm] = useState({ fullName: "", phone: "", notes: "" });
+  const [form, setForm] = useState<ClientFormState>({ fullName: "", phone: "", notes: [] });
   const [clientExists, setClientExists] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -198,7 +206,7 @@ const normalizeStoredPhoto = (
       setForm({
         fullName: demoClient.fullName,
         phone: demoClient.phone == null ? "" : String(demoClient.phone),
-        notes: demoClient.notes || "",
+        notes: toNoteOptionArray(demoClient.notes),
       });
       setPhotos(mapDemoPhotos(listDemoPhotos(id)));
       return;
@@ -214,7 +222,7 @@ const normalizeStoredPhoto = (
       setForm({
         fullName: data.fullName || "",
         phone: data.phone == null ? "" : String(data.phone),
-        notes: data.notes || "",
+        notes: toNoteOptionArray(data.notes),
       });
     });
 
@@ -333,18 +341,23 @@ const normalizeStoredPhoto = (
     setErrorMsg(null);
 
     try {
+      const selectedNotes = Array.isArray(form.notes) ? [...form.notes] : [];
       if (isDemo) {
-        updateDemoClient(id, { fullName, phone: phone || undefined, notes: form.notes });
+        updateDemoClient(id, { fullName, phone: phone || undefined, notes: selectedNotes });
       } else {
         const payload: Record<string, any> = {
           fullName,
           fullName_lower: fullName.toLowerCase(),
-          notes: form.notes,
         };
         if (phone) {
           payload.phone = phone;
         } else {
           payload.phone = deleteField();
+        }
+        if (selectedNotes.length > 0) {
+          payload.notes = selectedNotes;
+        } else {
+          payload.notes = deleteField();
         }
         await updateDoc(doc(db!, CLIENTS_COLLECTION, id), payload);
       }
@@ -354,6 +367,16 @@ const normalizeStoredPhoto = (
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleToggleNote = (option: NoteOption) => {
+    setForm((prev) => {
+      const hasOption = prev.notes.includes(option);
+      return {
+        ...prev,
+        notes: hasOption ? prev.notes.filter((item) => item !== option) : [...prev.notes, option],
+      };
+    });
   };
 
   const deleteClient = async () => {
@@ -474,12 +497,28 @@ const normalizeStoredPhoto = (
 
       <section className="grid gap-3 bg-[var(--cream-strong)] border border-[var(--border-soft)] rounded-2xl p-5">
         <h2 className="detail-sub">Notas</h2>
-        <textarea
-          className="input min-h-[200px]"
-          value={form.notes}
-          onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))}
-          disabled={!canManage}
-        />
+        <div className="grid gap-2 sm:grid-cols-2">
+          {NOTE_OPTIONS.map((option) => {
+            const checked = form.notes.includes(option);
+            return (
+              <label
+                key={option}
+                className={`flex items-center gap-3 rounded-xl border border-[var(--border-soft)] bg-white/60 px-3 py-2 text-sm text-[var(--ink)] ${
+                  canManage ? "cursor-pointer hover:border-[var(--accent-soft)]" : "opacity-70"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-[var(--accent)]"
+                  checked={checked}
+                  onChange={() => handleToggleNote(option)}
+                  disabled={!canManage}
+                />
+                <span>{NOTE_LABELS[option]}</span>
+              </label>
+            );
+          })}
+        </div>
         {canManage && (
           <button onClick={() => void saveClient()} className="btn btn-primary w-fit" disabled={saving}>
             {saving ? "Guardando..." : "Guardar notas"}

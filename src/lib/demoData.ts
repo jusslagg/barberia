@@ -1,5 +1,5 @@
 
-import type { Client, Role } from "../types";
+import type { Client, Role, ClientNotes } from "../types";
 
 const isoNow = () => new Date().toISOString();
 
@@ -9,7 +9,7 @@ const initialClients: Client[] = [
     fullName: "Carlos Ruiz",
     phone: "555 0101",
     mainBarberId: "demo-barber",
-    notes: "Fade bajo con linea marcada. Usa pomada mate.",
+    notes: ["corte", "lavado"],
     createdAt: isoNow(),
   },
   {
@@ -17,7 +17,7 @@ const initialClients: Client[] = [
     fullName: "Maria Garcia",
     phone: "555 0123",
     mainBarberId: "demo-barber",
-    notes: "Corte bob texturizado. Prefiere styling natural.",
+    notes: ["alisado", "planchado"],
     createdAt: isoNow(),
   },
   {
@@ -25,7 +25,7 @@ const initialClients: Client[] = [
     fullName: "Leo Suarez",
     phone: "555 0145",
     mainBarberId: "demo-barber",
-    notes: "Cliente nuevo. Probar mid fade la proxima visita.",
+    notes: ["otros"],
     createdAt: isoNow(),
   },
 ];
@@ -87,13 +87,18 @@ export function getDemoClient(id: string) {
   return clientsStore.find((c) => c.id === id) || null;
 }
 
-export function createDemoClient(data: { fullName: string; phone?: string; mainBarberId?: string; notes?: string }) {
+export function createDemoClient(data: {
+  fullName: string;
+  phone?: string;
+  mainBarberId?: string;
+  notes?: ClientNotes;
+}) {
   const newClient: Client = {
     id: `demo-client-${Date.now()}`,
     fullName: data.fullName,
     phone: data.phone,
     mainBarberId: data.mainBarberId || defaultOwnerId,
-    notes: data.notes || "",
+    notes: data.notes ?? [],
     createdAt: isoNow(),
   };
   clientsStore = [newClient, ...clientsStore];
