@@ -5,10 +5,12 @@ import {
   deleteDoc,
   deleteField,
   doc,
+  getDoc,
   getDocs,
   onSnapshot,
   query,
   serverTimestamp,
+  setDoc,
   updateDoc,
   where,
 } from "firebase/firestore";
@@ -34,6 +36,7 @@ import { NOTE_LABELS, toNoteOptionArray } from "../utils/noteOptions";
 
 const CLIENTS_COLLECTION = "clientes";
 const CUTS_COLLECTION = "cuts";
+const PORTFOLIO_COLLECTION = "public_portfolio";
 
 type StoredPhotoValue = {
   url: string;
@@ -47,6 +50,7 @@ type ClientPhoto = PhotoItem & {
   rawValue?: StoredPhotoValue;
   docHasSinglePhoto?: boolean;
   demoId?: string;
+  createdAtRaw?: any;
 };
 
 type ClientFormState = {
@@ -147,6 +151,52 @@ const normalizeStoredPhoto = (
     setPhotos((prev) => prev.filter((item) => item.key !== photoKey));
   };
 
+  const publishToPublicPortfolio = async (photo: ClientPhoto, createdAtValue?: any) => {
+    if (!db || !id) return;
+    try {
+      const ref = doc(db!, PORTFOLIO_COLLECTION, photo.key);
+      const payload: Record<string, any> = {
+        url: photo.url,
+        clientId: id,
+        cutId: photo.cutId ?? null,
+        updatedAt: serverTimestamp(),
+      };
+      if (createdAtValue) {
+        payload.createdAt = createdAtValue;
+      } else {
+        payload.createdAt = serverTimestamp();
+      }
+      await setDoc(ref, payload, { merge: true });
+    } catch (error) {
+      console.error("No pudimos publicar la foto en el portafolio publico.", error);
+    }
+  };
+
+  const ensurePortfolioEntries = async (entries: { photo: ClientPhoto; createdAt?: any }[]) => {
+    if (!db || !id || !entries.length) return;
+    try {
+      await Promise.all(
+        entries.map(async ({ photo, createdAt }) => {
+          const ref = doc(db!, PORTFOLIO_COLLECTION, photo.key);
+          const existing = await getDoc(ref);
+          if (existing.exists()) return;
+          await publishToPublicPortfolio(photo, createdAt);
+        }),
+      );
+    } catch (error) {
+      console.error("No pudimos sincronizar el portafolio publico.", error);
+    }
+  };
+
+  const removeFromPublicPortfolio = async (photoKey: string) => {
+    if (!db) return;
+    try {
+      await deleteDoc(doc(db!, PORTFOLIO_COLLECTION, photoKey));
+    } catch (error) {
+      console.error("No pudimos quitar la foto del portafolio publico.", error);
+    }
+  };
+
   const handleDeletePhoto = async (photo: ClientPhoto) => {
     if (!id || deletingPhotoKey) return;
     const confirmDelete = window.confirm("Seguro que deseas eliminar esta foto?");
@@ -180,6 +230,7 @@ const normalizeStoredPhoto = (
       }
 
       removePhotoLocally(photo.key);
+      await removeFromPublicPortfolio(photo.key);
     } catch (error) {
       console.error("No pudimos eliminar la foto", error);
       setPhotoError(
@@ -274,6 +325,7 @@ const normalizeStoredPhoto = (
               rawValue: normalized.rawValue,
               docHasSinglePhoto: rawPhotos.length <= 1,
               barberId: normalized.barberId,
+              createdAtRaw: data.createdAt,
             },
             createdAt: data.createdAt,
           });
@@ -291,6 +343,9 @@ const normalizeStoredPhoto = (
         return bTime - aTime;
       });
       setPhotos(list.map((item) => item.photo).slice(0, 12));
+      if (!isDemo) {
+        void ensurePortfolioEntries(list);
+      }
     })();
 
     return () => unsubscribe();
@@ -330,21 +385,19 @@ const normalizeStoredPhoto = (
         createdAt: serverTimestamp(),
       });
       const key = `${docRef.id}-0`;
-      setPhotos((prev) =>
-        [
-          {
-            key,
-            id: key,
-            url: asset.url,
-            deleteToken: asset.deleteToken ?? null,
-            cutId: docRef.id,
-            rawValue: photoPayload,
-            docHasSinglePhoto: true,
-            barberId: user?.uid || "",
-          },
-          ...prev,
-        ].slice(0, 12),
-      );
+      const newPhoto: ClientPhoto = {
+        key,
+        id: key,
+        url: asset.url,
+        deleteToken: asset.deleteToken ?? null,
+        cutId: docRef.id,
+        rawValue: photoPayload,
+        docHasSinglePhoto: true,
+        barberId: user?.uid || "",
+        createdAtRaw: serverTimestamp(),
+      };
+      setPhotos((prev) => [newPhoto, ...prev].slice(0, 12));
+      void publishToPublicPortfolio(newPhoto);
     } catch (error) {
       console.error("No pudimos registrar la foto", error);
       setPhotoError("No pudimos guardar la foto en el cliente.");

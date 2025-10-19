@@ -1,11 +1,10 @@
-import {
-  sendPasswordResetEmail,
-  signInWithEmailAndPassword,
-} from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
-import { FormEvent, useEffect, useState } from "react";
+import { sendPasswordResetEmail, signInWithEmailAndPassword } from "firebase/auth";
+import { collection, doc, getDoc, getDocs, limit, orderBy, query } from "firebase/firestore";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import AutoCarousel, { type CarouselItem } from "../components/AutoCarousel";
 import { auth, db } from "../lib/firebase";
+import { listDemoClients, listDemoPhotos } from "../lib/demoData";
 import { useAuth } from "./AuthContext";
 
 const AUTH_ERROR_MESSAGES: Record<string, string> = {
@@ -47,14 +46,134 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [resetMsg, setResetMsg] = useState<string | null>(null);
+  const [portfolioItems, setPortfolioItems] = useState<CarouselItem[]>([]);
   const nav = useNavigate();
   const { user, loading } = useAuth();
+  const isDemo = !db;
+  const portfolioFeed = useMemo<CarouselItem[]>(() => {
+    if (portfolioItems.length) return portfolioItems;
+    const fallback = showcase[2];
+    return [
+      {
+        id: "portfolio-fallback",
+        url: fallback.src,
+        alt: fallback.caption,
+      },
+    ];
+  }, [portfolioItems]);
 
   useEffect(() => {
     if (!loading && user) {
       nav("/clientes", { replace: true });
     }
   }, [user, loading, nav]);
+
+  useEffect(() => {
+    let active = true;
+
+    const extractPhotoUrl = (entry: unknown): string | null => {
+      if (typeof entry === "string") return entry;
+      if (entry && typeof entry === "object") {
+        const record = entry as Record<string, any>;
+        if (typeof record.url === "string" && record.url) return record.url;
+        if (typeof record.secure_url === "string" && record.secure_url) return record.secure_url;
+        if (typeof record.path === "string" && record.path) return record.path;
+      }
+      return null;
+    };
+
+    const loadDemoPhotos = () => {
+      const clients = listDemoClients();
+      const normalized: CarouselItem[] = [];
+      clients.forEach((client) => {
+        const photos = listDemoPhotos(client.id);
+        photos.forEach((photo, index) => {
+          if (!photo?.url) return;
+          normalized.push({
+            id: `${client.id}-${photo.id ?? index}`,
+            url: photo.url,
+          });
+        });
+      });
+      return normalized;
+    };
+
+    const fetchPortfolioFromCuts = async (): Promise<CarouselItem[]> => {
+      if (!db) return [];
+      const cutsRef = collection(db, "cuts");
+      const snapshot = await getDocs(cutsRef);
+      const aggregated: { id: string; url: string; createdAt: number }[] = [];
+
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as Record<string, any>;
+        const createdAt = data.createdAt?.toMillis
+          ? data.createdAt.toMillis()
+          : typeof data.createdAt === "number"
+            ? data.createdAt
+            : 0;
+        const photos = Array.isArray(data.photos) ? data.photos : [];
+        photos.forEach((entry, index) => {
+          const url = extractPhotoUrl(entry);
+          if (!url) return;
+          aggregated.push({
+            id: `${docSnap.id}-${index}`,
+            url,
+            createdAt,
+          });
+        });
+      });
+
+      aggregated.sort((a, b) => b.createdAt - a.createdAt);
+      return aggregated.map(({ id, url }) => ({ id, url }));
+    };
+
+    const fetchPublicPortfolio = async (): Promise<CarouselItem[]> => {
+      if (!db) return [];
+      const baseRef = collection(db, "public_portfolio");
+      const q = query(baseRef, orderBy("createdAt", "desc"), limit(30));
+      const snapshot = await getDocs(q);
+      return snapshot.docs
+        .map((docSnap) => {
+          const data = docSnap.data() as Record<string, any>;
+          const url = typeof data.url === "string" ? data.url : null;
+          if (!url) return null;
+          return { id: docSnap.id, url };
+        })
+        .filter(Boolean) as CarouselItem[];
+    };
+
+    const loadPhotos = async () => {
+      if (isDemo || !db) {
+        const demoPhotos = loadDemoPhotos();
+        if (active) setPortfolioItems(demoPhotos);
+        return;
+      }
+
+      try {
+        const publicItems = await fetchPublicPortfolio();
+        if (publicItems.length) {
+          if (active) setPortfolioItems(publicItems);
+          return;
+        }
+      } catch (error) {
+        console.error("No pudimos acceder al portafolio publico.", error);
+      }
+
+      try {
+        const fallbackItems = await fetchPortfolioFromCuts();
+        if (active) setPortfolioItems(fallbackItems);
+      } catch (error) {
+        console.error("No pudimos cargar las imagenes del portafolio visual.", error);
+        if (active) setPortfolioItems([]);
+      }
+    };
+
+    loadPhotos().catch((error) => console.error("Error inesperado al cargar portafolio visual.", error));
+
+    return () => {
+      active = false;
+    };
+  }, [isDemo]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -156,7 +275,7 @@ export default function Login() {
               ))}
             </div>
             <figure>
-              <img src={showcase[2].src} alt={showcase[2].caption} />
+              <AutoCarousel items={portfolioFeed} transitionMs={1300} />
               <figcaption>{showcase[2].caption}</figcaption>
             </figure>
           </div>
