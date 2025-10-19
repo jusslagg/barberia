@@ -4,11 +4,12 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { db } from "../lib/firebase";
-import { createDemoClient, listDemoClients } from "../lib/demoData";
+import { createDemoClient, listDemoClients, listDemoPhotos } from "../lib/demoData";
 import type { Client } from "../types";
 import { notesToSearchText, toNoteOptionArray } from "../utils/noteOptions";
 
 const CLIENTS_COLLECTION = "clientes";
+const PORTFOLIO_COLLECTION = "public_portfolio";
 
 const normalizeClient = (docId: string, raw: Record<string, any>, fallbackOwner?: string | null): Client => {
   const first = raw.fullName || raw.fullname || raw.nombre || raw.Nombre || "";
@@ -57,6 +58,51 @@ export default function ClientsList() {
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [clientPhotos, setClientPhotos] = useState<Record<string, string>>({});
+
+  const loadClientThumbnails = useCallback(async (): Promise<Record<string, string>> => {
+    if (isDemo || !db) {
+      const mapping: Record<string, string> = {};
+      const demoClients = listDemoClients();
+      demoClients.forEach((client) => {
+        const photos = listDemoPhotos(client.id);
+        if (!photos.length) return;
+        const oldest = photos[photos.length - 1] ?? photos[0];
+        if (oldest?.url) {
+          mapping[client.id] = oldest.url;
+        }
+      });
+      return mapping;
+    }
+
+    try {
+      const database = db!;
+      const snapshot = await getDocs(collection(database, PORTFOLIO_COLLECTION));
+      const byClient: Record<string, { url: string; createdAt: number }> = {};
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as Record<string, any>;
+        const rawClientId = data.clientId ?? data.client_id ?? data.clienteId;
+        const clientId = typeof rawClientId === "string" && rawClientId ? rawClientId : null;
+        const url = typeof data.url === "string" && data.url ? data.url : null;
+        if (!clientId || !url) return;
+        const createdAtRaw = data.createdAt;
+        const createdAt =
+          typeof createdAtRaw?.toMillis === "function"
+            ? createdAtRaw.toMillis()
+            : typeof createdAtRaw === "number"
+              ? createdAtRaw
+              : Number.MAX_SAFE_INTEGER;
+        const current = byClient[clientId];
+        if (!current || createdAt < current.createdAt) {
+          byClient[clientId] = { url, createdAt };
+        }
+      });
+      return Object.fromEntries(Object.entries(byClient).map(([clientId, info]) => [clientId, info.url]));
+    } catch (error) {
+      console.error("No pudimos cargar las imagenes de portada de los clientes.", error);
+      return {};
+    }
+  }, [isDemo, db]);
 
   const refreshDemoData = useCallback(() => {
     const demo = listDemoClients();
@@ -64,7 +110,8 @@ export default function ClientsList() {
     setRows(applyFilters(demo, qText, onlyMine, user?.uid));
     setLoading(false);
     setLoadError(null);
-  }, [onlyMine, qText, user?.uid]);
+    void loadClientThumbnails().then((map) => setClientPhotos(map));
+  }, [onlyMine, qText, user?.uid, loadClientThumbnails]);
 
   const fetchClients = useCallback(async () => {
     if (!db) {
@@ -85,6 +132,8 @@ export default function ClientsList() {
       const mapped = snap.docs.map((doc) => normalizeClient(doc.id, doc.data() as any, user?.uid));
       const sorted = mapped.sort((a, b) => a.fullName.localeCompare(b.fullName));
       setAllRows(sorted);
+      const photoMap = await loadClientThumbnails();
+      setClientPhotos(photoMap);
     } catch (error) {
       console.error("No pudimos cargar clientes", error);
       setAllRows([]);
@@ -228,17 +277,30 @@ export default function ClientsList() {
       <section className="space-y-3">
         {loading && <div className="text-[var(--ink-soft)]">Cargando...</div>}
         {loadError && !loading && <div className="text-sm text-red-600">{loadError}</div>}
-        {!loading && !loadError &&
-          displayRows.map((client) => (
-            <Link key={client.id} to={`/clientes/${client.id}`} className="list-item">
-              <div className="avatar">{client.fullName.split(" ").map((part) => part[0]).slice(0, 2)}</div>
-              <div className="flex-1">
-                <div className="title">{client.fullName}</div>
-                {client.phone && <div className="sub">{client.phone}</div>}
-              </div>
-              <span className="sub">Ver</span>
-            </Link>
-          ))}
+        {!loading &&
+          !loadError &&
+          displayRows.map((client) => {
+            const coverUrl = clientPhotos[client.id];
+            const initials =
+              client.fullName
+                .split(" ")
+                .filter(Boolean)
+                .map((part) => part[0]?.toUpperCase() ?? "")
+                .join("")
+                .slice(0, 2) || "?";
+            return (
+              <Link key={client.id} to={`/clientes/${client.id}`} className="list-item">
+                <div className={`avatar${coverUrl ? " has-photo" : ""}`}>
+                  {coverUrl ? <img src={coverUrl} alt={`Foto de ${client.fullName}`} /> : initials}
+                </div>
+                <div className="flex-1">
+                  <div className="title">{client.fullName}</div>
+                  {client.phone && <div className="sub">{client.phone}</div>}
+                </div>
+                <span className="sub">Ver</span>
+              </Link>
+            );
+          })}
         {!loading && !loadError && displayRows.length === 0 && <div className="text-[var(--ink-soft)] text-sm">No encontramos coincidencias.</div>}
       </section>
 
