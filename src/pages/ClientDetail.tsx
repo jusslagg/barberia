@@ -15,6 +15,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import PhotoGrid, { type PhotoItem } from "../components/PhotoGrid";
+import PhotoLightbox from "../components/PhotoLightbox";
 import Uploader from "../components/Uploader";
 import { useAuth } from "../auth/AuthContext";
 import { db } from "../lib/firebase";
@@ -66,6 +67,7 @@ export default function ClientDetail() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [deletingPhotoKey, setDeletingPhotoKey] = useState<string | null>(null);
+  const [activePhotoIndex, setActivePhotoIndex] = useState<number | null>(null);
 
   const isDemo = !db;
   const canManage = role === "admin" || role === "barbero";
@@ -189,6 +191,28 @@ const normalizeStoredPhoto = (
       setDeletingPhotoKey(null);
     }
   };
+
+  const handleSelectPhoto = (photo: ClientPhoto, index: number) => {
+    if (!photos.length) return;
+    if (index >= 0 && index < photos.length) {
+      setActivePhotoIndex(index);
+      return;
+    }
+    const fallbackIndex = photos.findIndex((item) => item.key === photo.key);
+    setActivePhotoIndex(fallbackIndex >= 0 ? fallbackIndex : 0);
+  };
+
+  useEffect(() => {
+    if (activePhotoIndex === null) return;
+    if (!photos.length) {
+      setActivePhotoIndex(null);
+      return;
+    }
+    const maxIndex = photos.length - 1;
+    if (activePhotoIndex > maxIndex) {
+      setActivePhotoIndex(maxIndex);
+    }
+  }, [photos, activePhotoIndex]);
 
   useEffect(() => {
     if (!id) return;
@@ -478,6 +502,7 @@ const normalizeStoredPhoto = (
             photos={photos}
             canDelete={canManage}
             onDelete={(photo) => void handleDeletePhoto(photo as ClientPhoto)}
+            onSelect={(photo, index) => handleSelectPhoto(photo as ClientPhoto, index)}
           />
           {photoError && <p className="text-xs text-red-500">{photoError}</p>}
           {(isDemo && !demoMode) || !cloudReady ? (
@@ -492,8 +517,8 @@ const normalizeStoredPhoto = (
               Mientras tanto se utilizaran imagenes de muestra temporales.
             </p>
           )}
-        </section>
-      </div>
+      </section>
+    </div>
 
       <section className="grid gap-3 bg-[var(--cream-strong)] border border-[var(--border-soft)] rounded-2xl p-5">
         <h2 className="detail-sub">Notas</h2>
@@ -525,6 +550,14 @@ const normalizeStoredPhoto = (
           </button>
         )}
       </section>
+
+      {activePhotoIndex !== null && photos.length > 0 ? (
+        <PhotoLightbox
+          photos={photos}
+          initialIndex={activePhotoIndex}
+          onClose={() => setActivePhotoIndex(null)}
+        />
+      ) : null}
     </div>
   );
 }
