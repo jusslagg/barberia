@@ -10,7 +10,7 @@ import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 export default function App(){
   return (
     <AuthProvider>
-      <HashRouter>
+      <HashRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
         <Routes>
           <Route path="/" element={<Navigate to="/clientes" replace/>} />
           <Route path="/login" element={<Login/>}/>

@@ -1,28 +1,29 @@
-import { createUserWithEmailAndPassword, fetchSignInMethodsForEmail, sendPasswordResetEmail, signInWithEmailAndPassword, updateProfile } from "firebase/auth";
-import { collection, doc, getDocs, limit, query, updateDoc, where } from "firebase/firestore";
+import {
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+} from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
 import { FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { auth, db } from "../lib/firebase";
 import { useAuth } from "./AuthContext";
 
 const AUTH_ERROR_MESSAGES: Record<string, string> = {
-  "auth/invalid-email": "El correo no tiene un formato valido.",
+  "auth/invalid-email": "El correo no tiene un formato válido.",
   "auth/user-not-found": "No encontramos una cuenta con ese correo.",
-  "auth/wrong-password": "Contrasena incorrecta. Intenta de nuevo.",
-  "auth/invalid-credential": "Credenciales invalidas. Verifica tu correo y contrasena.",
-  "auth/user-disabled": "La cuenta esta deshabilitada. Contacta al administrador.",
+  "auth/wrong-password": "Contraseña incorrecta. Intenta de nuevo.",
+  "auth/invalid-credential": "Credenciales inválidas. Verifica tus datos.",
+  "auth/user-disabled": "La cuenta está deshabilitada. Contacta al administrador.",
   "auth/too-many-requests": "Demasiados intentos fallidos. Espera unos minutos e intenta de nuevo.",
 };
-
-const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const resolveAuthMessage = (error: unknown) => {
   if (typeof error === "object" && error && "code" in error) {
     const code = String((error as { code?: string }).code || "").toLowerCase();
     if (code in AUTH_ERROR_MESSAGES) return AUTH_ERROR_MESSAGES[code];
-    if (code.startsWith("auth/")) return "No pudimos iniciar sesion. Verifica tus datos.";
+    if (code.startsWith("auth/")) return "No pudimos iniciar sesión. Verifica tus datos.";
   }
-  return "No pudimos iniciar sesion. Verifica tu correo y contrasena.";
+  return "No pudimos iniciar sesión. Verifica tu correo y contraseña.";
 };
 
 const showcase = [
@@ -36,68 +37,9 @@ const showcase = [
   },
   {
     src: "https://images.unsplash.com/photo-1505483531331-65230405b270?auto=format&fit=crop&w=900&q=80",
-    caption: "Portafolio visual - mantente al dia con las imagenes de cada servicio",
+    caption: "Portafolio visual - mantente al día con las imágenes de cada servicio",
   },
 ];
-
-type ReservedProfile = {
-  refPath: string;
-  collection: "barberos" | "users";
-  data: Record<string, any>;
-};
-
-const extractDisplayName = (data?: Record<string, any> | null) => {
-  if (!data) return undefined;
-  const primary = data.displayName || data.nombre || data.Nombre;
-  const last = data.lastName || data.apellido || data.Apellido;
-  if (primary && last) return `${primary} ${last}`.trim();
-  if (primary) return primary;
-  if (last) return last;
-  return undefined;
-};
-
-const findReservedProfile = async (email: string): Promise<ReservedProfile | null> => {
-  if (!db) return null;
-  const emailLower = email.toLowerCase();
-  const checks: Array<{ col: "barberos" | "users"; field: string }> = [
-    { col: "barberos", field: "emailLower" },
-    { col: "barberos", field: "email" },
-    { col: "users", field: "emailLower" },
-    { col: "users", field: "email" },
-  ];
-
-  for (const { col, field } of checks) {
-    const base = collection(db, col);
-    const q = query(base, where(field, "==", field === "emailLower" ? emailLower : email), limit(1));
-    const snap = await getDocs(q);
-    const docSnap = snap.docs[0];
-    if (docSnap) {
-      return { refPath: `${col}/${docSnap.id}`, collection: col, data: docSnap.data() as Record<string, any> };
-    }
-  }
-  return null;
-};
-
-const persistProfileLink = async (profile: ReservedProfile, uid: string, email: string, displayName?: string) => {
-  if (!db) return;
-  const ref = doc(db, profile.refPath);
-  const payload: Record<string, any> = {
-    uid,
-    email,
-    emailLower: email.toLowerCase(),
-  };
-  if (displayName) payload.displayName = displayName;
-  await updateDoc(ref, payload).catch(() => undefined);
-};
-
-const normalizeSeedValue = (value: unknown) => {
-  if (value == null) return "";
-  const normalized = String(value)
-    .normalize("NFKC")
-    .replace(/^[\s"'`´]+|[\s"'`´]+$/g, "")
-    .trim();
-  return normalized;
-};
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -106,35 +48,23 @@ export default function Login() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [resetMsg, setResetMsg] = useState<string | null>(null);
   const nav = useNavigate();
-  const { user, role, loading } = useAuth();
-
-  const resolvedHome = role === "admin" ? "/admin/usuarios" : "/clientes";
-  const logoSrc = `${import.meta.env.BASE_URL}images/logo.png`;
-
-  const validateEmail = (value: string) => emailPattern.test(value.trim());
+  const { user, loading } = useAuth();
 
   useEffect(() => {
-    if (loading) return;
-    if (!user) return;
-
-    nav(resolvedHome, { replace: true });
-  }, [user, role, loading, resolvedHome, nav]);
+    if (!loading && user) {
+      nav("/clientes", { replace: true });
+    }
+  }, [user, loading, nav]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!auth) return;
+    if (!auth || !db) return;
 
     const emailTrimmed = email.trim();
     const passwordTrimmed = pass.trim();
 
-    if (!validateEmail(emailTrimmed)) {
-      setErrorMsg("Ingresa un correo valido (ejemplo@dominio.com).");
-      setResetMsg(null);
-      return;
-    }
-    if (!passwordTrimmed) {
-      setErrorMsg("Ingresa una contrasena.");
-      setResetMsg(null);
+    if (!emailTrimmed || !passwordTrimmed) {
+      setErrorMsg("Completa ambos campos para continuar.");
       return;
     }
 
@@ -143,57 +73,40 @@ export default function Login() {
     setResetMsg(null);
 
     try {
-      if (db) {
-        const methods = await fetchSignInMethodsForEmail(auth, emailTrimmed);
-        if (!methods.length) {
-          const reserved = await findReservedProfile(emailTrimmed);
-          if (!reserved) {
-            setErrorMsg("Tu correo no esta registrado por el administrador.");
-            setSubmitting(false);
-            return;
-          }
+      // 🔐 1. Iniciar sesión con Firebase Auth
+      const credential = await signInWithEmailAndPassword(auth, emailTrimmed, passwordTrimmed);
+      const uid = credential.user.uid;
 
-          const seedPasswordRaw = reserved.data.passwordSeed ?? reserved.data.dni ?? "";
-          const normalizedSeed = normalizeSeedValue(seedPasswordRaw);
-          if (!normalizedSeed) {
-            setErrorMsg("Tu perfil reservado no tiene un DNI configurado. Contacta al administrador.");
-            setSubmitting(false);
-            return;
-          }
+      // 🔎 2. Buscar documento en "barberos"
+      const barberRef = doc(db, "barberos", uid);
+      const barberSnap = await getDoc(barberRef);
 
-          const normalizedInput = normalizeSeedValue(passwordTrimmed);
-          if (normalizedInput !== normalizedSeed) {
-            setErrorMsg("Tu contraseña inicial es tu DNI registrado.");
-            setSubmitting(false);
-            return;
-          }
-
-          try {
-            const credential = await createUserWithEmailAndPassword(auth, emailTrimmed, normalizedSeed);
-            const profileName = extractDisplayName(reserved.data);
-            if (profileName) {
-              await updateProfile(credential.user, { displayName: profileName }).catch(() => undefined);
-            }
-            await persistProfileLink(reserved, credential.user.uid, emailTrimmed, profileName);
-          } catch (creationError) {
-            const creationCode =
-              typeof creationError === "object" && creationError && "code" in creationError
-                ? String((creationError as { code?: string }).code || "").toLowerCase()
-                : "";
-            if (creationCode !== "auth/email-already-in-use") {
-              console.error("No pudimos crear la cuenta en el primer acceso", creationError);
-              setErrorMsg(resolveAuthMessage(creationError));
-              setSubmitting(false);
-              return;
-            }
-            console.warn("La cuenta ya existia al intentar el primer acceso, continuamos con el inicio de sesion.");
-          }
+      // 🔎 3. Si no está en barberos, buscar en "users"
+      let role: string | null = null;
+      if (barberSnap.exists()) {
+        role = barberSnap.data().role || null;
+      } else {
+        const userRef = doc(db, "users", uid);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          role = userSnap.data().role || null;
         }
       }
 
-      await signInWithEmailAndPassword(auth, emailTrimmed, passwordTrimmed);
+      if (!role) {
+        throw new Error("No se encontró el rol del usuario.");
+      }
+
+      // 🚀 4. Redirigir según rol
+      if (role === "admin") {
+        nav("/admin/usuarios", { replace: true });
+      } else if (role === "barbero") {
+        nav("/clientes", { replace: true });
+      } else {
+        throw new Error("Rol desconocido o no autorizado.");
+      }
     } catch (error) {
-      console.error("No pudimos iniciar sesion", error);
+      console.error("Error al iniciar sesión:", error);
       setErrorMsg(resolveAuthMessage(error));
     } finally {
       setSubmitting(false);
@@ -203,64 +116,24 @@ export default function Login() {
   const handleResetPassword = async () => {
     if (!auth) return;
     const emailTrimmed = email.trim();
-    if (!validateEmail(emailTrimmed)) {
-      setErrorMsg("Ingresa un correo valido para recuperar tu contrasena.");
-      setResetMsg(null);
+
+    if (!emailTrimmed) {
+      setErrorMsg("Ingresa tu correo para recuperar la contraseña.");
       return;
     }
+
     try {
-      if (db) {
-        const methods = await fetchSignInMethodsForEmail(auth, emailTrimmed);
-        if (!methods.length) {
-          const reserved = await findReservedProfile(emailTrimmed);
-          if (!reserved) {
-            setErrorMsg("Tu correo no esta registrado por el administrador.");
-            setResetMsg(null);
-            return;
-          }
-          const seedPasswordRaw = reserved.data.passwordSeed ?? reserved.data.dni ?? "";
-          const normalizedSeed = normalizeSeedValue(seedPasswordRaw);
-          if (!normalizedSeed) {
-            setErrorMsg("Tu perfil reservado no tiene un DNI configurado. Contacta al administrador.");
-            setResetMsg(null);
-            return;
-          }
-          let createdAccount = false;
-          try {
-            const credential = await createUserWithEmailAndPassword(auth, emailTrimmed, normalizedSeed);
-            const profileName = extractDisplayName(reserved.data);
-            if (profileName) {
-              await updateProfile(credential.user, { displayName: profileName }).catch(() => undefined);
-            }
-            await persistProfileLink(reserved, credential.user.uid, emailTrimmed, profileName);
-            createdAccount = true;
-          } catch (creationError) {
-            const creationCode =
-              typeof creationError === "object" && creationError && "code" in creationError
-                ? String((creationError as { code?: string }).code || "").toLowerCase()
-                : "";
-            if (creationCode !== "auth/email-already-in-use") {
-              console.error("No pudimos crear la cuenta en el primer acceso", creationError);
-              setErrorMsg(resolveAuthMessage(creationError));
-              setResetMsg(null);
-              return;
-            }
-            console.warn("La cuenta ya existia al preparar el restablecimiento de contrasena.");
-          }
-          if (createdAccount) {
-            await auth.signOut();
-          }
-        }
-      }
       await sendPasswordResetEmail(auth, emailTrimmed);
-      setResetMsg("Te enviamos un correo para restablecer tu contrasena.");
+      setResetMsg("Te enviamos un correo para restablecer tu contraseña.");
       setErrorMsg(null);
     } catch (error) {
-      console.error("No pudimos enviar el correo de recuperacion", error);
+      console.error("Error al enviar correo de recuperación:", error);
       setErrorMsg(resolveAuthMessage(error));
       setResetMsg(null);
     }
   };
+
+  const logoSrc = `${import.meta.env.BASE_URL}images/logo.png`;
 
   return (
     <div className="login-hero">
@@ -290,8 +163,8 @@ export default function Login() {
 
           <div className="login-panel">
             <div className="space-y-2">
-              <h2>Inicia sesion</h2>
-              <p>Ingresa con tu correo corporativo. Te enviaremos automaticamente al modulo correspondiente segun tu rol.</p>
+              <h2>Inicia sesión</h2>
+              <p>Ingresa con tu correo corporativo. Te enviaremos automáticamente al módulo correspondiente según tu rol.</p>
             </div>
 
             <form className="login-form" onSubmit={handleSubmit}>
@@ -301,44 +174,47 @@ export default function Login() {
                   className="input mt-1"
                   placeholder="ejemplo@barberia.com"
                   value={email}
-                  onChange={(event) => setEmail(event.target.value)}
+                  onChange={(e) => setEmail(e.target.value)}
                   type="email"
                   autoComplete="email"
                   required
                 />
               </div>
               <div>
-                <label className="block text-xs uppercase tracking-wide text-black/50">Contrasena</label>
+                <label className="block text-xs uppercase tracking-wide text-black/50">Contraseña</label>
                 <input
                   className="input mt-1"
                   placeholder="********"
                   type="password"
                   value={pass}
-                  onChange={(event) => setPass(event.target.value)}
+                  onChange={(e) => setPass(e.target.value)}
                   autoComplete="current-password"
                   required
                   minLength={6}
                 />
               </div>
+
               {errorMsg && <p className="text-xs text-red-600">{errorMsg}</p>}
               {resetMsg && <p className="text-xs text-green-600">{resetMsg}</p>}
-              <button className="btn btn-primary" type="submit" disabled={submitting || loading}>
+
+              <button className="btn btn-primary" type="submit" disabled={submitting}>
                 {submitting ? "Ingresando..." : "Entrar"}
               </button>
+
               <button
                 className="mt-2 text-sm font-semibold text-[#d67c21] underline hover:text-[#b86516]"
                 type="button"
-                disabled={submitting || loading}
+                disabled={submitting}
                 onClick={handleResetPassword}
               >
-                Olvid� mi contrase�a
+                Olvidé mi contraseña
               </button>
             </form>
 
             <div className="text-xs text-black/50 space-y-1">
               <p><span className="font-semibold text-black/70">Rol admin:</span> administra barberos, roles y directorio.</p>
-              <p><span className="font-semibold text-black/70">Rol barbero:</span> gestiona clientes, notas y galeria asignada.</p>
-              <p>SoportE: <span className="font-semibold text-black/70">barberiawebpro@gmail.com</span></p>
+              <p><span className="font-semibold text-black/70">Rol barbero:</span> gestiona clientes, notas y galería asignada.</p>
+              <p>Soporte: <span className="font-semibold text-black/70">barberiawebpro@gmail.com</span></p>
             </div>
           </div>
         </div>

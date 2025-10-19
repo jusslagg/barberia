@@ -23,3 +23,9 @@ npm run dev
 - `/clientes/:id` (detalle)
 - `/admin/usuarios` (roles)
 - `/login`
+
+## Cloudinary
+- Crea un preset sin firma en Cloudinary y coloca `VITE_CLOUDINARY_CLOUD_NAME` y `VITE_CLOUDINARY_UPLOAD_PRESET` en tu `.env`.
+- Activa la opcion **Return delete token** en ese preset para que los barberos puedan borrar fotos desde la app.
+- Cada carga se guarda en la carpeta `clientes/<ID>` para mantener ordenadas las imagenes por cliente.
+- Si las variables no estan definidas, la app usa imagenes de prueba para que el flujo siga funcionando en modo demo.

@@ -14,7 +14,8 @@ const normalizeClient = (docId: string, raw: Record<string, any>, fallbackOwner?
   const last = raw.lastName || raw.apellido || raw.Apellido || "";
   const combined = `${first} ${last}`.trim();
   const fullName = combined || first || last || docId;
-  const mainBarberId = raw.mainBarberId || raw.barberoId || raw.ownerId || fallbackOwner || "";
+  const mainBarberId =
+    raw.mainBarberId || raw.barberId || raw.barberoId || raw.ownerId || fallbackOwner || "";
   return {
     id: docId,
     fullName,

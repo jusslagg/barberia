@@ -1,16 +1,16 @@
 import { getApp, getApps, initializeApp, type FirebaseApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
 import { getFirestore, initializeFirestore, type Firestore } from "firebase/firestore";
+import { getStorage, type FirebaseStorage } from "firebase/storage";
 
 const fallbackConfig = {
-  apiKey: "AIzaSyBhrcZwtoUXgdlh1o9hmVN3COZjuKBW4lM",
-  authDomain: "barberia-20938.firebaseapp.com",
-  projectId: "barberia-20938",
-  storageBucket: "barberia-20938.firebasestorage.app",
-  messagingSenderId: "846907688289",
-  appId: "1:846907688289:web:cd14404104465d72d17120",
+  apiKey: "AIzaSyC1ciO4ZxGRNcx4Q87BxJa0y7lFpsvKurc",
+  authDomain: "barberia-7ac00.firebaseapp.com",
+  projectId: "barberia-7ac00",
+  storageBucket: "barberia-7ac00.appspot.com",
+  messagingSenderId: "301206293641",
+  appId: "1:301206293641:web:c9635693f4519d3dbdca58",
 };
-
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || fallbackConfig.apiKey,
@@ -26,6 +26,7 @@ const isFirebaseConfigured = Object.values(firebaseConfig).every(Boolean);
 let app: FirebaseApp | undefined;
 let auth: Auth | null = null;
 let db: Firestore | null = null;
+let storage: FirebaseStorage | null = null;
 let resolvedFirebase = isFirebaseConfigured;
 
 if (isFirebaseConfigured) {
@@ -50,6 +51,8 @@ if (isFirebaseConfigured) {
       }
       db = getFirestore(app);
     }
+    storage = getStorage(app);
+
   } catch (error) {
     resolvedFirebase = false;
     console.error("No se pudo inicializar Firebase, se usara modo demostracion.", error);
@@ -58,4 +61,10 @@ if (isFirebaseConfigured) {
   console.warn("Firebase config faltante: ejecutando en modo demostracion");
 }
 
-export { auth, db, resolvedFirebase as isFirebaseConfigured };
+try {
+  // @ts-ignore
+  (window as any).__fb = { auth, db };
+  console.log("🔥 Firebase projectId =>", auth?.app?.options?.projectId);
+} catch {}
+
+export { auth, db, storage, resolvedFirebase as isFirebaseConfigured };

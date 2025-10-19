@@ -1,7 +1,8 @@
-import { addDoc, collection, deleteDoc, doc, getDocs, orderBy, query, updateDoc } from "firebase/firestore";
+﻿import { collection, deleteDoc, doc, getDocs, orderBy, query, updateDoc } from "firebase/firestore";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { db } from "../lib/firebase";
+import { registrarBarbero } from "../lib/registrarBarbero";
 import { createDemoUser, deleteDemoUser, listDemoUsers, updateDemoUser } from "../lib/demoData";
 import type { Role } from "../types";
 
@@ -23,13 +24,14 @@ type FormState = {
   email: string;
   dni: string;
   role: Role;
+  password: string;
 };
 
 const BARBERS_COLLECTION = "barberos";
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const normalizeName = (first?: string, last?: string) => `${first ?? ""} ${last ?? ""}`.trim();
 
-const emptyForm: FormState = { firstName: "", lastName: "", email: "", dni: "", role: "barbero" };
+const emptyForm: FormState = { firstName: "", lastName: "", email: "", dni: "", role: "barbero", password: "" };
 
 const mapDemoUsers = (): Row[] =>
   listDemoUsers().map((demo) => {
@@ -43,6 +45,7 @@ const mapDemoUsers = (): Row[] =>
       lastName,
       email: demo.email,
       emailLower: demo.email.toLowerCase(),
+      dni: demo.id.replace("demo-user-", ""),
       role: demo.role,
     };
   });
@@ -70,7 +73,7 @@ export default function AdminUsers() {
           const data = docSnap.data() as Record<string, any>;
           const firstName = data.firstName || data.nombre || "";
           const lastName = data.lastName || data.apellido || "";
-          const dni = data.dni || data.passwordSeed || "";
+          const dni = data.dni || "";
           return {
             id: docSnap.id,
             displayName: data.displayName || normalizeName(firstName, lastName),
@@ -81,7 +84,7 @@ export default function AdminUsers() {
             dni,
             role: data.role as Role | undefined,
           };
-        })
+        }),
       );
     };
 
@@ -98,7 +101,7 @@ export default function AdminUsers() {
         const dni = (item.dni || "").toLowerCase();
         return name.includes(searchTerm) || email.includes(searchTerm) || dni.includes(searchTerm);
       }),
-    [rows, searchTerm]
+    [rows, searchTerm],
   );
 
   const openForm = (row?: Row) => {
@@ -114,6 +117,7 @@ export default function AdminUsers() {
         email: row.email || "",
         dni: row.dni || "",
         role: (row.role as Role) || "barbero",
+        password: "",
       });
     } else {
       setForm(emptyForm);
@@ -128,13 +132,14 @@ export default function AdminUsers() {
     const lastName = form.lastName.trim();
     const email = form.email.trim();
     const dni = form.dni.trim();
+    const password = form.password.trim();
 
     if (!firstName || !lastName || !email || !dni) {
       setErrorMsg("Nombre, apellido, email y DNI son obligatorios.");
       return;
     }
     if (!emailPattern.test(email)) {
-      setErrorMsg("Ingresa un correo valido.");
+      setErrorMsg("Ingresa un correo válido.");
       return;
     }
 
@@ -160,29 +165,43 @@ export default function AdminUsers() {
           email,
           emailLower,
           dni,
-          passwordSeed: emailLower,
           role: form.role,
         });
         setRows((prev) =>
           prev.map((row) =>
             row.id === form.id
               ? { ...row, firstName, lastName, displayName, email, emailLower, dni, role: form.role }
-              : row
-          )
+              : row,
+          ),
         );
       } else {
-        const newDoc = await addDoc(collection(db!, BARBERS_COLLECTION), {
+        if (password.length < 6) {
+          setErrorMsg("La contraseña debe tener al menos 6 caracteres.");
+          setSaving(false);
+          return;
+        }
+
+        const result = await registrarBarbero({
+          displayName,
+          email,
+          password,
+        });
+
+        if (!result.success || !result.uid) {
+          throw new Error(result.message || "No pudimos registrar el barbero.");
+        }
+
+        await updateDoc(doc(db!, BARBERS_COLLECTION, result.uid), {
           firstName,
           lastName,
-          displayName,
           email,
           emailLower,
           dni,
-          passwordSeed: dni,
           role: form.role,
         });
+
         setRows((prev) => [
-          { id: newDoc.id, firstName, lastName, displayName, email, emailLower, dni, role: form.role },
+          { id: result.uid, firstName, lastName, displayName, email, emailLower, dni, role: form.role },
           ...prev,
         ]);
       }
@@ -190,7 +209,8 @@ export default function AdminUsers() {
       setForm(emptyForm);
     } catch (error) {
       console.error("No pudimos guardar el usuario", error);
-      setErrorMsg("No pudimos guardar el usuario.");
+      const message = error instanceof Error ? error.message : "No pudimos guardar el usuario.";
+      setErrorMsg(message);
     } finally {
       setSaving(false);
     }
@@ -207,17 +227,7 @@ export default function AdminUsers() {
   };
 
   const removeUser = async (id: string) => {
-    const target = rows.find((row) => row.id === id);
-    if (!target) return;
-
-    if (target.role === "admin") {
-      window.alert("No puedes eliminar perfiles con rol admin desde aqu�.");
-      return;
-    }
-
-    const label = target.displayName || target.email || id;
-    const confirmed = window.confirm(`Seguro que deseas eliminar a ${label}?`);
-    if (!confirmed) return;
+    if (!window.confirm("Seguro que deseas eliminar este barbero?")) return;
 
     try {
       if (!db) {
@@ -229,16 +239,16 @@ export default function AdminUsers() {
       }
     } catch (error) {
       console.error("No pudimos eliminar el usuario", error);
-      alert("No pudimos eliminar el usuario.");
+      setErrorMsg("No pudimos eliminar el usuario.");
     }
   };
 
   if (loading) {
-    return <div className="panel">Cargando...</div>;
+    return <div className="panel text-[var(--ink)]">Cargando usuarios…</div>;
   }
 
   if (role !== "admin") {
-    return <div className="panel text-[var(--ink)]">No tienes permisos para ver esta pagina.</div>;
+    return <div className="panel text-[var(--ink)]">No tienes permisos para ver esta página.</div>;
   }
 
   return (
@@ -246,30 +256,28 @@ export default function AdminUsers() {
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-2">
           <span className="text-xs uppercase tracking-[0.5em] text-[var(--ink-soft)]">Equipo</span>
-          <h1 className="text-3xl font-semibold text-[var(--ink)]">Administracion de usuarios</h1>
-          <p className="text-sm text-[var(--ink-soft)] max-w-2xl">
-            Agrega barberos, otorga permisos de administrador y manten actualizado el directorio interno.
+          <h1 className="text-3xl font-semibold text-[var(--ink)]">Gestión de barberos</h1>
+          <p className="text-sm text-[var(--ink-soft)]">
+            Crea cuentas nuevas, asigna roles y mantén la información de tu staff al día.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <input
-            className="input w-60"
-            placeholder="Buscar"
-            value={qText}
-            onChange={(event) => setQText(event.target.value)}
-          />
-          <button className="btn btn-primary w-full sm:w-auto" onClick={() => openForm()}>
-            Nuevo barbero
-          </button>
-        </div>
+        <button className="btn btn-primary" onClick={() => openForm()}>
+          Nuevo barbero
+        </button>
       </header>
 
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <input
+          className="searchbar"
+          placeholder="Buscar por nombre, correo o DNI"
+          value={qText}
+          onChange={(event) => setQText(event.target.value)}
+        />
+      </div>
+
       {showForm && (
-        <form
-          className="grid gap-4 bg-[var(--cream-strong)] border border-[var(--border-soft)] rounded-2xl p-5"
-          onSubmit={handleSubmit}
-        >
-          <div className="grid gap-3 md:grid-cols-4">
+        <form className="grid gap-4 bg-[var(--cream-strong)] border border-[var(--border-soft)] rounded-2xl p-5" onSubmit={handleSubmit}>
+          <div className="grid gap-3 md:grid-cols-5">
             <div>
               <label className="block text-xs uppercase tracking-[0.3em] text-[var(--ink-soft)]">Nombre</label>
               <input
@@ -283,7 +291,7 @@ export default function AdminUsers() {
               <label className="block text-xs uppercase tracking-[0.3em] text-[var(--ink-soft)]">Apellido</label>
               <input
                 className="input mt-1"
-                placeholder="Ej. Gomez"
+                placeholder="Ej. Gómez"
                 value={form.lastName}
                 onChange={(event) => setForm((prev) => ({ ...prev, lastName: event.target.value }))}
               />
@@ -304,20 +312,37 @@ export default function AdminUsers() {
                 placeholder="correo@dominio.com"
                 value={form.email}
                 onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
+                type="email"
               />
             </div>
+            <div>
+              <label className="block text-xs uppercase tracking-[0.3em] text-[var(--ink-soft)]">Rol</label>
+              <select
+                className="input mt-1"
+                value={form.role}
+                onChange={(event) => setForm((prev) => ({ ...prev, role: event.target.value as Role }))}
+              >
+                <option value="barbero">barbero</option>
+                <option value="admin">admin</option>
+              </select>
+            </div>
           </div>
-          <div>
-            <label className="block text-xs uppercase tracking-[0.3em] text-[var(--ink-soft)]">Rol</label>
-            <select
-              className="input mt-1"
-              value={form.role}
-              onChange={(event) => setForm((prev) => ({ ...prev, role: event.target.value as Role }))}
-            >
-              <option value="barbero">barbero</option>
-              <option value="admin">admin</option>
-            </select>
-          </div>
+
+          {!form.id && (
+            <div>
+              <label className="block text-xs uppercase tracking-[0.3em] text-[var(--ink-soft)]">Contraseña temporal</label>
+              <input
+                className="input mt-1"
+                placeholder="Mínimo 6 caracteres"
+                type="password"
+                value={form.password}
+                onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
+                required
+                minLength={6}
+              />
+            </div>
+          )}
+
           {errorMsg && <p className="text-xs text-red-500">{errorMsg}</p>}
           <div className="flex flex-wrap gap-2">
             <button className="btn btn-primary w-full sm:w-auto" type="submit" disabled={saving}>
@@ -344,10 +369,18 @@ export default function AdminUsers() {
           <tbody className="divide-y divide-[rgba(44,21,10,0.08)]">
             {filtered.map((userRow) => (
               <tr key={userRow.id} className="bg-[rgba(244,237,225,0.85)]">
-                <td className="py-3 pr-3 font-medium" data-label="Nombre completo">{userRow.displayName || normalizeName(userRow.firstName, userRow.lastName) || "-"}</td>
-                <td className="py-3 pr-3" data-label="DNI">{userRow.dni || "-"}</td>
-                <td className="py-3 pr-3" data-label="Email">{userRow.email || "-"}</td>
-                <td className="py-3 pr-3 uppercase tracking-[0.25em] text-xs" data-label="Rol">{userRow.role}</td>
+                <td className="py-3 pr-3 font-medium" data-label="Nombre completo">
+                  {userRow.displayName || normalizeName(userRow.firstName, userRow.lastName) || "-"}
+                </td>
+                <td className="py-3 pr-3" data-label="DNI">
+                  {userRow.dni || "-"}
+                </td>
+                <td className="py-3 pr-3" data-label="Email">
+                  {userRow.email || "-"}
+                </td>
+                <td className="py-3 pr-3 uppercase tracking-[0.25em] text-xs" data-label="Rol">
+                  {userRow.role}
+                </td>
                 <td className="py-3 actions-cell" data-label="Acciones">
                   <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 w-full">
                     <select
@@ -379,13 +412,8 @@ export default function AdminUsers() {
       </div>
 
       <p className="text-xs text-[var(--ink-soft)]">
-        Nota: la creacion de usuarios (Auth) se hace desde Firebase console; aqui administras los perfiles y roles.
+        Las cuentas creadas desde este panel generan usuario en Firebase Auth y perfil en Firestore automáticamente.
       </p>
     </div>
   );
 }
-
-
-
-
-

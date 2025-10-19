@@ -32,18 +32,41 @@ const initialClients: Client[] = [
 
 let clientsStore: Client[] = [...initialClients];
 
-const initialPhotos: Record<string, string[]> = {
+export type DemoPhoto = { id: string; url: string; deleteToken?: string | null; barberId?: string };
+
+const createDemoPhoto = (url: string, deleteToken?: string | null, barberId?: string): DemoPhoto => ({
+  id: `demo-photo-${Math.random().toString(36).slice(2, 10)}`,
+  url,
+  deleteToken: deleteToken ?? null,
+  barberId,
+});
+
+const initialPhotos: Record<string, DemoPhoto[]> = {
   "carlos-ruiz": [
-    "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=600&q=80",
-    "https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=400&q=80",
+    createDemoPhoto(
+      "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=600&q=80",
+      null,
+      "demo-barber",
+    ),
+    createDemoPhoto(
+      "https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=400&q=80",
+      null,
+      "demo-barber",
+    ),
   ],
   "maria-garcia": [
-    "https://images.unsplash.com/photo-1492725764893-90b379c2b6e7?auto=format&fit=crop&w=500&q=80",
+    createDemoPhoto(
+      "https://images.unsplash.com/photo-1492725764893-90b379c2b6e7?auto=format&fit=crop&w=500&q=80",
+      null,
+      "demo-barber",
+    ),
   ],
   "leo-suarez": [],
 };
 
-let photosStore: Record<string, string[]> = { ...initialPhotos };
+let photosStore: Record<string, DemoPhoto[]> = Object.fromEntries(
+  Object.entries(initialPhotos).map(([clientId, photos]) => [clientId, photos.map((photo) => ({ ...photo }))]),
+);
 
 export type DemoUser = { id: string; displayName: string; email: string; role: Role };
 
@@ -91,9 +114,16 @@ export function listDemoPhotos(clientId: string) {
   return [...(photosStore[clientId] || [])];
 }
 
-export function pushDemoPhoto(clientId: string, url: string) {
+export function pushDemoPhoto(clientId: string, photo: { url: string; deleteToken?: string | null; barberId?: string }) {
+  const entry = createDemoPhoto(photo.url, photo.deleteToken, photo.barberId);
   const current = photosStore[clientId] || [];
-  photosStore[clientId] = [url, ...current];
+  photosStore[clientId] = [entry, ...current];
+  return photosStore[clientId];
+}
+
+export function deleteDemoPhoto(clientId: string, photoId: string) {
+  const current = photosStore[clientId] || [];
+  photosStore[clientId] = current.filter((photo) => photo.id !== photoId);
   return photosStore[clientId];
 }
 
